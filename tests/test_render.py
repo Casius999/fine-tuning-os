@@ -1,6 +1,5 @@
 # tests/test_render.py
 import importlib.util
-from pathlib import Path
 
 import pytest
 
@@ -16,9 +15,7 @@ _HAS_WEASYPRINT = importlib.util.find_spec("weasyprint") is not None
 
 
 def test_sha256_bytes_known_vector():
-    assert sha256_bytes(b"") == (
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    )
+    assert sha256_bytes(b"") == ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 
 
 def test_sha256_file_matches_bytes(tmp_path):

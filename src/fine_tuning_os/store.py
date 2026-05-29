@@ -77,9 +77,7 @@ class Store:
         self.write_project(project_id, new_state)
         return new_state
 
-    def append_event(
-        self, project_id: str, event_type: str, payload: dict[str, Any]
-    ) -> str:
+    def append_event(self, project_id: str, event_type: str, payload: dict[str, Any]) -> str:
         event_id = uuid.uuid4().hex
         record = {"id": event_id, "ts": _now(), "type": event_type, "payload": payload}
         path = self.project_dir(project_id) / "events.jsonl"

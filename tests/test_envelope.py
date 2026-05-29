@@ -3,7 +3,7 @@ import dataclasses
 
 import pytest
 
-from fine_tuning_os.envelope import Result, fail, ok
+from fine_tuning_os.envelope import fail, ok
 
 
 def test_ok_builds_success_result():

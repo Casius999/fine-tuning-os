@@ -1,6 +1,5 @@
 # tests/test_store.py
 import json
-from pathlib import Path
 
 from fine_tuning_os.store import Store, workspace_root
 
