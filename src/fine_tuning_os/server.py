@@ -7,6 +7,8 @@ health tool; the 64 domain tools are added across lots 2-9. Transport: stdio.
 
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.server.fastmcp import FastMCP
 
 from . import __version__
@@ -35,8 +37,8 @@ _TARGET_KINDS: tuple[str, ...] = (
         "which external targets are configured (booleans only — never secrets)."
     )
 )
-def ftos_health() -> dict:
-    targets = {kind: resolve_target(kind) is not None for kind in _TARGET_KINDS}
+def ftos_health() -> dict[str, Any]:
+    targets = {kind: resolve_target(kind) for kind in _TARGET_KINDS}
     return ok(
         {
             "name": "fine-tuning-os",

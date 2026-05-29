@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -16,6 +17,13 @@ class Result:
     data: dict[str, Any] | None = None
     error: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Frozen guards rebinding, not mutation of the dicts. Deep-copy so a
+        # caller cannot mutate data/meta after the Result is built.
+        if self.data is not None:
+            object.__setattr__(self, "data", deepcopy(self.data))
+        object.__setattr__(self, "meta", deepcopy(self.meta))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -40,7 +40,11 @@ class Store:
         self.root = Path(root) if root is not None else workspace_root()
 
     def project_dir(self, project_id: str) -> Path:
-        return self.root / project_id
+        root = self.root.resolve()
+        pdir = (root / project_id).resolve()
+        if not pdir.is_relative_to(root):
+            raise ValueError(f"project_id escapes workspace: {project_id!r}")
+        return pdir
 
     def init_project(self, project_id: str, client: str) -> dict[str, Any]:
         pdir = self.project_dir(project_id)
@@ -68,8 +72,11 @@ class Store:
         pdir.mkdir(parents=True, exist_ok=True)
         path = pdir / "project.json"
         tmp = path.with_name("project.json.tmp")
-        tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        try:
+            tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def update_project(self, project_id: str, **changes: Any) -> dict[str, Any]:
         state = self.read_project(project_id)

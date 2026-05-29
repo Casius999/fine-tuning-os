@@ -31,6 +31,14 @@ def test_masks_long_base64_blob():
     assert n == 1
 
 
+def test_masks_padded_base64_including_tail():
+    blob = "QUJD" * 20 + "=="  # 80 base64 chars + padding
+    out, n = sanitize_text(f"key={blob}")
+    assert "==" not in out  # padding tail must be masked too
+    assert "[REDACTED:BLOB]" in out
+    assert n == 1
+
+
 def test_clean_text_is_unchanged_and_counts_zero():
     text = "loss=0.42 step=10 vram=11GB"
     out, n = sanitize_text(text)

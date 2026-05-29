@@ -25,8 +25,25 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
 }
 
 
-def resolve_target(kind: str) -> dict[str, str] | None:
-    """Return the env config for `kind`, or None if not fully configured."""
+def resolve_target(kind: str) -> bool:
+    """Return True iff every env var for `kind` is present (non-empty).
+
+    Only presence is surfaced — secret values never leave this module via
+    this function, so it is safe to expose to Claude and to log.
+    """
+    names = _REQUIRED.get(kind)
+    if names is None:
+        raise ValueError(f"unknown target kind: {kind}")
+    return all(os.environ.get(name) for name in names)
+
+
+def _get_target_config(kind: str) -> dict[str, str] | None:
+    """Return the env config dict for `kind`, or None if not fully configured.
+
+    Internal use only: C2 tools that must open a live connection read the
+    secret values here. Callers MUST NOT log, persist, or return these
+    values to Claude (Zero-Data, cf. spec §5/§6).
+    """
     names = _REQUIRED.get(kind)
     if names is None:
         raise ValueError(f"unknown target kind: {kind}")
@@ -41,6 +58,6 @@ def resolve_target(kind: str) -> dict[str, str] | None:
 
 def gate(kind: str) -> tuple[bool, dict[str, Any]]:
     """Return (configured, meta) where meta carries executed/dry_run flags."""
-    if resolve_target(kind) is None:
+    if not resolve_target(kind):
         return False, {"executed": False, "dry_run": True}
     return True, {"executed": True, "dry_run": False}

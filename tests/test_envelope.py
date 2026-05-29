@@ -3,7 +3,7 @@ import dataclasses
 
 import pytest
 
-from fine_tuning_os.envelope import fail, ok
+from fine_tuning_os.envelope import Result, fail, ok
 
 
 def test_ok_builds_success_result():
@@ -36,3 +36,17 @@ def test_result_is_frozen():
     r = ok()
     with pytest.raises(dataclasses.FrozenInstanceError):
         r.success = False  # type: ignore[misc]
+
+
+def test_result_isolates_data_from_caller_mutation():
+    payload = {"x": 1}
+    r = ok(payload)
+    payload["x"] = 999  # caller mutates its own dict after building Result
+    assert r.data == {"x": 1}
+
+
+def test_result_isolates_meta_from_caller_mutation():
+    source = {"command": "docker build ."}
+    r = Result(success=True, meta=source)
+    source["command"] = "tampered"  # caller mutates its own dict afterwards
+    assert r.meta == {"command": "docker build ."}

@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 _NONCE_BYTES = 12
 _KEY_BYTES = 32
+_TAG_BYTES = 16  # AES-GCM authentication tag appended to the ciphertext
 
 
 def generate_key() -> bytes:
@@ -34,7 +35,11 @@ def encrypt_file(src: Path, dst: Path, key: bytes) -> Path:
 
 
 def decrypt_file(src: Path, dst: Path, key: bytes) -> Path:
+    if len(key) != _KEY_BYTES:
+        raise ValueError("key must be 32 bytes for AES-256-GCM")
     blob = Path(src).read_bytes()
+    if len(blob) < _NONCE_BYTES + _TAG_BYTES:
+        raise ValueError("ciphertext too short to contain nonce + GCM tag")
     nonce, ciphertext = blob[:_NONCE_BYTES], blob[_NONCE_BYTES:]
     plaintext = AESGCM(key).decrypt(nonce, ciphertext, None)
     dst = Path(dst)

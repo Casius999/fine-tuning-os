@@ -1,6 +1,8 @@
 # tests/test_store.py
 import json
 
+import pytest
+
 from fine_tuning_os.store import Store, workspace_root
 
 
@@ -56,3 +58,10 @@ def test_write_project_is_atomic_no_tmp_left(tmp_path):
     store.init_project("p1", "ACME")
     leftovers = list((tmp_path / "p1").glob("*.tmp"))
     assert leftovers == []
+
+
+@pytest.mark.parametrize("evil", ["../escape", "../../etc", "a/../../b"])
+def test_project_dir_rejects_traversal(tmp_path, evil):
+    store = Store(root=tmp_path)
+    with pytest.raises(ValueError):
+        store.project_dir(evil)
