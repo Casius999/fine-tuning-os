@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 
 class Column(BaseModel):
@@ -42,8 +42,8 @@ class SplitRatios(BaseModel):
 
     @field_validator("test")
     @classmethod
-    def ratios_sum_to_one(cls, test: float, info: object) -> float:
-        data = info.data  # type: ignore[union-attr]
+    def ratios_sum_to_one(cls, test: float, info: ValidationInfo) -> float:
+        data = info.data
         total = data.get("train", 0.0) + data.get("val", 0.0) + test
         if abs(total - 1.0) > 1e-6:
             raise ValueError(f"train+val+test must sum to 1.0, got {total}")

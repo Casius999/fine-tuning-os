@@ -451,6 +451,23 @@ class TestErrorPaths:
         )
         assert result["success"] is False
 
+    def test_validate_schema_type_mismatch_no_secret(self, tmp_path):
+        """Type-mismatch row: conforms=False AND the wrong-typed secret value is absent."""
+        f = tmp_path / "data.jsonl"
+        secret = "SUPER_SECRET_VALUE_XYZ"
+        # Plant the secret as the value of an int column — wrong type
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with f.open("w") as fh:
+            fh.write(json.dumps({"label": secret}) + "\n")
+        schema = {"columns": [{"name": "label", "dtype": "int"}]}
+        result = prep.validate_data_schema(file_path=str(f), schema=schema)
+        # Should flag the mismatch
+        assert result["success"] is True
+        assert result["data"]["conforms"] is False
+        # The planted secret value must NOT appear in the returned dict
+        result_str = json.dumps(result)
+        assert secret not in result_str
+
 
 # ---------------------------------------------------------------------------
 # MCP wrappers smoke-test (coverage for lines 507-563)

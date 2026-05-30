@@ -14,7 +14,6 @@ from ..store import Store, workspace_root
 # ---------------------------------------------------------------------------
 # Value generators by dtype
 # ---------------------------------------------------------------------------
-_LABELS = ["positive", "negative", "neutral", "label_a", "label_b", "label_c"]
 
 
 def _make_value(col_name: str, dtype: str, rng: random.Random, idx: int) -> Any:
@@ -81,7 +80,10 @@ def generate_synthetic_dataset(
         return fail(str(exc)).to_dict()
 
     content = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n"
-    write_text_atomic(dest, content)
+    try:
+        write_text_atomic(dest, content)
+    except (ValueError, OSError) as exc:
+        return fail(str(exc)).to_dict()
 
     return ok({"path": str(dest), "n": n, "seed": seed}).to_dict()
 
@@ -91,6 +93,7 @@ def generate_synthetic_dataset(
 # ---------------------------------------------------------------------------
 
 
+# MCP wrapper — keep signature in sync with generate_synthetic_dataset
 def _mcp_generate_synthetic_dataset(
     project_id: str,
     n: int,

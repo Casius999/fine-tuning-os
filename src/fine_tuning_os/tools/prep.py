@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import jinja2
 from pydantic import ValidationError
 
 from ..envelope import fail, ok
@@ -138,14 +139,14 @@ def create_training_config(
             scheduler=params.scheduler,
             max_seq_len=params.max_seq_len,
         )
-    except Exception as exc:
+    except jinja2.TemplateError as exc:
         return fail(f"template error: {exc}").to_dict()
 
     s = _get_store(store)
     try:
         dest = s.project_dir(project_id) / "config" / "training.yaml"
         write_text_atomic(dest, content)
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         return fail(str(exc)).to_dict()
 
     return ok({"path": str(dest), "framework": framework, "content": content}).to_dict()
@@ -438,10 +439,13 @@ def anonymize_dataset_preview(file_path: str) -> dict[str, Any]:
     if not fp.exists():
         return fail(f"file not found: {file_path}").to_dict()
 
-    raw = fp.read_text(encoding="utf-8")
-    masked_text, masked_count = sanitize_text(raw)
-    anon_path = fp.with_suffix(fp.suffix + ".anon")
-    write_text_atomic(anon_path, masked_text)
+    try:
+        raw = fp.read_text(encoding="utf-8")
+        masked_text, masked_count = sanitize_text(raw)
+        anon_path = fp.with_suffix(fp.suffix + ".anon")
+        write_text_atomic(anon_path, masked_text)
+    except (OSError, UnicodeDecodeError) as exc:
+        return fail(str(exc)).to_dict()
 
     return ok({"anon_path": str(anon_path), "masked_count": masked_count}).to_dict()
 
@@ -479,7 +483,7 @@ def split_dataset_config(
             seed=seed,
             stratify=stratify,
         )
-    except Exception as exc:
+    except jinja2.TemplateError as exc:
         return fail(f"template error: {exc}").to_dict()
 
     result_data: dict[str, Any] = {
@@ -507,6 +511,7 @@ def split_dataset_config(
 # These wrappers call the underlying functions with store=None (default workspace).
 
 
+# MCP wrapper — keep signature in sync with create_training_config
 def _mcp_create_training_config(
     project_id: str,
     base_model: str,
@@ -531,9 +536,10 @@ def _mcp_create_training_config(
     )
 
 
+# MCP wrapper — keep signature in sync with generate_requirements
 def _mcp_generate_requirements(
     framework: str = "unsloth",
-    cuda: bool = True,
+    cuda: bool | str = True,
     extras: list[str] | None = None,
     project_id: str | None = None,
 ) -> dict[str, Any]:
@@ -542,14 +548,17 @@ def _mcp_generate_requirements(
     )
 
 
+# MCP wrapper — keep signature in sync with create_project_structure
 def _mcp_create_project_structure(project_id: str, client_name: str) -> dict[str, Any]:
     return create_project_structure(project_id=project_id, client_name=client_name)
 
 
+# MCP wrapper — keep signature in sync with load_project_template
 def _mcp_load_project_template(template_name: str, project_id: str) -> dict[str, Any]:
     return load_project_template(template_name=template_name, project_id=project_id)
 
 
+# MCP wrapper — keep signature in sync with describe_expected_data_format
 def _mcp_describe_expected_data_format(
     project_id: str,
     columns: list[dict[str, str]],
@@ -560,6 +569,7 @@ def _mcp_describe_expected_data_format(
     )
 
 
+# MCP wrapper — keep signature in sync with validate_data_schema
 def _mcp_validate_data_schema(
     file_path: str,
     schema: dict[str, Any] | None = None,
@@ -568,10 +578,12 @@ def _mcp_validate_data_schema(
     return validate_data_schema(file_path=file_path, schema=schema, project_id=project_id)
 
 
+# MCP wrapper — keep signature in sync with anonymize_dataset_preview
 def _mcp_anonymize_dataset_preview(file_path: str) -> dict[str, Any]:
     return anonymize_dataset_preview(file_path=file_path)
 
 
+# MCP wrapper — keep signature in sync with split_dataset_config
 def _mcp_split_dataset_config(
     ratios: dict[str, float] | None = None,
     seed: int = 42,

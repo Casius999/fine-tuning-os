@@ -151,3 +151,69 @@ class TestGenerateSyntheticDataset:
         p = Path(result["data"]["path"])
         row = json.loads(p.read_text().splitlines()[0])
         assert isinstance(row["score"], float)
+
+
+# ---------------------------------------------------------------------------
+# MCP wrapper tests (Fix 7)
+# ---------------------------------------------------------------------------
+class TestMCPWrapper:
+    def test_mcp_wrapper_nominal(self, tmp_path):
+        """_mcp_generate_synthetic_dataset nominal path via inline schema."""
+        store = Store(root=tmp_path)
+        store.init_project("mcp1", "ACME")
+        inline_schema = {
+            "columns": [{"name": "text", "dtype": "str"}, {"name": "score", "dtype": "float"}],
+            "task_type": "regression",
+        }
+        # We can't pass store through the MCP wrapper, so set up the project with a schema
+        # and use monkeypatch approach — instead, test via generate_synthetic_dataset directly
+        # but call the wrapper with inline schema (which bypasses the store lookup).
+        # The wrapper signature matches the underlying function except `store`.
+        # Use monkeypatch to point workspace to tmp_path.
+        import os
+
+        old_env = os.environ.get("FTOS_WORKSPACE")
+        os.environ["FTOS_WORKSPACE"] = str(tmp_path)
+        try:
+            store.init_project("mcp1", "ACME")  # already inited, will be a no-op or update
+            result = synthetic._mcp_generate_synthetic_dataset(
+                project_id="mcp1",
+                n=10,
+                seed=42,
+                schema=inline_schema,
+            )
+        finally:
+            if old_env is None:
+                os.environ.pop("FTOS_WORKSPACE", None)
+            else:
+                os.environ["FTOS_WORKSPACE"] = old_env
+
+        assert result["success"] is True
+        assert result["data"]["n"] == 10
+
+    def test_mcp_wrapper_no_schema_error(self, tmp_path):
+        """project_id with no persisted schema and no inline schema returns success=False."""
+        import os
+
+        old_env = os.environ.get("FTOS_WORKSPACE")
+        os.environ["FTOS_WORKSPACE"] = str(tmp_path)
+        try:
+            store = Store(root=tmp_path)
+            store.init_project("mcp_noschema", "ACME")
+            # No schema persisted, no inline schema passed
+            result = synthetic._mcp_generate_synthetic_dataset(
+                project_id="mcp_noschema",
+                n=10,
+                seed=1,
+                schema=None,
+            )
+        finally:
+            if old_env is None:
+                os.environ.pop("FTOS_WORKSPACE", None)
+            else:
+                os.environ["FTOS_WORKSPACE"] = old_env
+
+        assert result["success"] is False
+        assert (
+            "data_schema" in result["error"].lower() or "no data_schema" in result["error"].lower()
+        )
