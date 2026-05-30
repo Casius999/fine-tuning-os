@@ -9,8 +9,10 @@ paramiko or subprocess.
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+import jinja2
 import pytest
 
 from fine_tuning_os.tools import execution
@@ -57,6 +59,24 @@ class TestPushDockerToRegistry:
         # IP and full email must be redacted
         assert "192.168.1.100" not in output
         assert "admin@registry.example.com" not in output
+
+    def test_live_branch_uses_list_not_shell(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Subprocess must be called with a list (not shell=True) to prevent injection."""
+        monkeypatch.setenv("FTOS_REGISTRY", "registry.example.com")
+        monkeypatch.setenv("FTOS_REGISTRY_TOKEN", "token")
+        captured: list[Any] = []
+
+        def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.append((cmd, kwargs))
+            return MagicMock(stdout="", stderr="", returncode=0)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            execution.push_docker_to_registry(tag="myimage:v1")
+
+        assert captured, "subprocess.run was not called"
+        cmd, kwargs = captured[0]
+        assert isinstance(cmd, list), "cmd must be a list (not a shell string)"
+        assert kwargs.get("shell") is False
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +135,32 @@ class TestGenerateDeploymentCommand:
             gpus=[],
         )
         assert result["success"] is True
+
+    # Fix #3: empty gpus list must NOT emit --gpus flag
+    def test_empty_gpus_no_gpu_flag(self) -> None:
+        result = execution.generate_deployment_command(
+            image="ftos:v1",
+            mounts=[],
+            env_names=[],
+            gpus=[],
+        )
+        assert result["success"] is True
+        assert "--gpus" not in result["data"]["command"]
+
+    # Fix #6: broken template render returns success=False
+    def test_compose_render_failure_returns_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def broken_render(*args: object, **kwargs: object) -> str:
+            raise jinja2.TemplateError("bad template")
+
+        monkeypatch.setattr("fine_tuning_os.tools.execution.render_template", broken_render)
+        result = execution.generate_deployment_command(
+            image="ftos:v1",
+            mounts=[],
+            env_names=[],
+            gpus=[],
+        )
+        assert result["success"] is False
+        assert "compose render failed" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +381,15 @@ class TestDetectAnomalies:
         alerts = result["data"]["alerts"]
         assert any("leak" in a["type"].lower() or "pii" in a["type"].lower() for a in alerts)
 
+    # Fix #9: NaN in metrics step_history triggers critical alert
+    def test_nan_in_metrics_step_history_triggers_critical(self) -> None:
+        metrics = {"step_history": [{"step": 1, "loss": float("nan")}]}
+        result = execution.detect_anomalies(logs=[], metrics=metrics)
+        assert result["success"] is True
+        alerts = result["data"]["alerts"]
+        critical = [a for a in alerts if a.get("severity") == "critical"]
+        assert len(critical) >= 1, f"Expected a critical alert for NaN, got: {alerts}"
+
 
 # ---------------------------------------------------------------------------
 # Tool 24: pause_resume_training (C2 ssh)
@@ -435,3 +490,43 @@ class TestEarlyStoppingCheck:
         assert result["success"] is True
         assert isinstance(result["data"]["reason"], str)
         assert len(result["data"]["reason"]) > 0
+
+    # Fix #1: len(losses) == patience must NOT crash (was ValueError: min([]))
+    def test_exactly_patience_steps_does_not_crash(self) -> None:
+        """When len(losses) == patience, early-stop must return continue, not crash."""
+        patience = 5
+        history = [{"step": i, "loss": 1.5} for i in range(1, patience + 1)]
+        result = execution.early_stopping_check(
+            metrics={"step_history": history},
+            patience=patience,
+            min_delta=0.001,
+        )
+        assert result["success"] is True
+        assert result["data"]["decision"] == "continue"
+
+
+# ---------------------------------------------------------------------------
+# MCP wrapper smoke tests (Fix #12) — execution module
+# ---------------------------------------------------------------------------
+class TestMcpWrappersExecution:
+    def test_push_docker_dry_run(self) -> None:
+        result = execution.push_docker_to_registry(tag="smoke:v1")
+        assert "success" in result
+
+    def test_generate_deployment_command_smoke(self) -> None:
+        result = execution.generate_deployment_command(
+            image="smoke:v1",
+            mounts=[],
+            env_names=["SMOKE_VAR"],
+            gpus=[],
+        )
+        assert "success" in result
+
+    def test_early_stopping_check_smoke(self) -> None:
+        history = [{"step": i, "loss": 1.0 - i * 0.05} for i in range(1, 12)]
+        result = execution.early_stopping_check(
+            metrics={"step_history": history},
+            patience=5,
+            min_delta=0.001,
+        )
+        assert "success" in result

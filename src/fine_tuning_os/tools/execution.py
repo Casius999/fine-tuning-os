@@ -21,6 +21,7 @@ import re
 import subprocess
 from typing import Any
 
+import jinja2
 import paramiko
 
 from ..envelope import fail, ok
@@ -36,18 +37,43 @@ from ..templating import render_template
 def _ssh_exec(host: str, key_path: str, command: str) -> tuple[str, str]:
     """Connect via paramiko key auth, run command, return (stdout, stderr).
 
+    AutoAddPolicy is used here to accept unknown host keys for the
+    operator-controlled bastion host.  Operators who prefer strict host-key
+    checking can supply a known_hosts file via paramiko's load_host_keys().
+
     Caller is responsible for sanitizing the output before returning it.
     """
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        client.connect(hostname=host, key_filename=key_path)
+        # Fix #4: add connect timeout to prevent hanging indefinitely
+        client.connect(hostname=host, key_filename=key_path, timeout=30)
         _, stdout, stderr = client.exec_command(command)
         out = stdout.read().decode(errors="replace")
         err = stderr.read().decode(errors="replace")
         return out, err
     finally:
         client.close()
+
+
+# ---------------------------------------------------------------------------
+# SSH gate helper (DRY — tools 20, 21, 22, 24)
+# ---------------------------------------------------------------------------
+
+
+def _ssh_gate(
+    fallback_host: str,
+) -> tuple[bool, dict[str, Any], str, dict[str, Any] | None]:
+    """Run the SSH C2 gate and return (configured, meta, host, cfg).
+
+    The dry_run command must reference the $FTOS_SSH_KEY NAME placeholder
+    (never the secret value) — callers use this helper to get host/cfg then
+    build their own dry_cmd string with $FTOS_SSH_KEY.
+    """
+    configured, meta = gate("ssh")
+    cfg = _get_target_config("ssh") if configured else None
+    host = cfg["FTOS_SSH_HOST"] if cfg else fallback_host
+    return configured, meta, host, cfg
 
 
 # ---------------------------------------------------------------------------
@@ -70,11 +96,11 @@ def push_docker_to_registry(tag: str) -> dict[str, Any]:
     if not configured:
         return ok({"command": command, "full_tag": full_tag}, **meta).to_dict()
 
-    # Live branch — token is passed via env so subprocess inherits it
+    # Fix #2: convert to list form — no shell=True (prevents command injection)
     try:
         proc = subprocess.run(
-            command,
-            shell=True,
+            ["docker", "push", full_tag],
+            shell=False,
             capture_output=True,
             text=True,
             timeout=300,
@@ -95,7 +121,12 @@ def push_docker_to_registry(tag: str) -> dict[str, Any]:
             },
             **meta,
         ).to_dict()
-    except (subprocess.TimeoutExpired, OSError) as exc:
+    except (
+        subprocess.TimeoutExpired,
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        OSError,
+    ) as exc:
         return fail(str(exc)).to_dict()
 
 
@@ -115,13 +146,12 @@ def generate_deployment_command(
     Env var NAMES are embedded as references (${VAR}); secret VALUES are
     never read or returned. No env vars needed to run this tool.
     """
-    # Build docker run command with env name references
+    # Fix #3: use truthiness check so empty list [] produces no --gpus flag
     gpu_flag = ""
     if gpus:
         gpu_ids = ",".join(gpus)
         gpu_flag = f" --gpus '\"device={gpu_ids}\"'"
-    elif gpus is not None:
-        gpu_flag = " --gpus all"
+    # (no else branch — empty list or no GPUs → no flag)
 
     env_flags = " ".join(f"-e {n}=${{{n}}}" for n in env_names)
     mount_flags = " ".join(
@@ -137,7 +167,7 @@ def generate_deployment_command(
     parts.append(image)
     command = " ".join(parts)
 
-    # Render compose YAML
+    # Fix #6: narrow bare except → jinja2.TemplateError only
     try:
         compose_content = render_template(
             "docker/compose.yaml.j2",
@@ -146,8 +176,8 @@ def generate_deployment_command(
             env_names=env_names,
             gpus=gpus,
         )
-    except Exception as exc:  # noqa: BLE001
-        compose_content = f"# template render error: {exc}"
+    except jinja2.TemplateError as exc:
+        return fail(f"compose render failed: {exc}").to_dict()
 
     return ok({"command": command, "compose_content": compose_content}).to_dict()
 
@@ -162,9 +192,7 @@ def trigger_remote_training(target: str, command: str) -> dict[str, Any]:
 
     Dry-run command uses $FTOS_SSH_KEY placeholder (never the secret value).
     """
-    configured, meta = gate("ssh")
-    cfg = _get_target_config("ssh") if configured else None
-    host = cfg["FTOS_SSH_HOST"] if cfg else target
+    configured, meta, host, cfg = _ssh_gate(fallback_host=target)
     dry_cmd = f"ssh -i $FTOS_SSH_KEY {host} '{command}'"
 
     if not configured:
@@ -190,9 +218,7 @@ def trigger_remote_training(target: str, command: str) -> dict[str, Any]:
 
 def stream_remote_logs(job_id: str, target: str, n_lines: int = 100) -> dict[str, Any]:
     """Fetch last n_lines of remote job logs over SSH; sanitize every line."""
-    configured, meta = gate("ssh")
-    cfg = _get_target_config("ssh") if configured else None
-    host = cfg["FTOS_SSH_HOST"] if cfg else target
+    configured, meta, host, cfg = _ssh_gate(fallback_host=target)
     remote_cmd = f"tail -{n_lines} ~/training_logs/{job_id}.log 2>/dev/null || echo 'no log'"
     dry_cmd = f"ssh -i $FTOS_SSH_KEY {host} '{remote_cmd}'"
 
@@ -229,9 +255,7 @@ _METRIC_RE = re.compile(r"step=(\d+).*?loss=([\d.]+)(?:.*?lr=([\d.e+-]+))?(?:.*?
 
 def monitor_training_metrics(job_id: str, source: str) -> dict[str, Any]:
     """Aggregate loss/lr/gpu series from sanitized remote logs."""
-    configured, meta = gate("ssh")
-    cfg = _get_target_config("ssh") if configured else None
-    host = cfg["FTOS_SSH_HOST"] if cfg else source
+    configured, meta, host, cfg = _ssh_gate(fallback_host=source)
     remote_cmd = f"cat ~/training_logs/{job_id}.log 2>/dev/null || echo 'no log'"
     dry_cmd = f"ssh -i $FTOS_SSH_KEY {host} '{remote_cmd}'"
 
@@ -277,19 +301,9 @@ def monitor_training_metrics(job_id: str, source: str) -> dict[str, Any]:
 _EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
-def detect_anomalies(
-    logs: list[str],
-    metrics: dict[str, Any],
-) -> dict[str, Any]:
-    """Analyze sanitized logs/metrics for anomalies.
-
-    Returns list of alerts with keys: type, severity, detail.
-    Inputs MUST already be sanitized (external text goes through sanitize_text
-    before reaching this tool via stream_remote_logs / monitor_training_metrics).
-    """
+def _check_log_anomalies(logs: list[str]) -> list[dict[str, Any]]:
+    """Scan log lines for NaN/Inf and PII patterns; return alerts."""
     alerts: list[dict[str, Any]] = []
-
-    # Check logs for NaN
     for i, line in enumerate(logs):
         if re.search(r"\bnan\b", line, re.IGNORECASE) or re.search(r"\binf\b", line, re.IGNORECASE):
             alerts.append(
@@ -299,7 +313,6 @@ def detect_anomalies(
                     "detail": f"NaN/Inf detected in log line {i + 1}: {line[:120]}",
                 }
             )
-        # Data-leak check: if a log line still contains an email-like pattern
         if _EMAIL_PATTERN.search(line):
             alerts.append(
                 {
@@ -308,8 +321,12 @@ def detect_anomalies(
                     "detail": f"Possible PII in log line {i + 1} (email-like pattern)",
                 }
             )
+    return alerts
 
-    # Metrics-based checks
+
+def _check_metric_anomalies(metrics: dict[str, Any]) -> list[dict[str, Any]]:
+    """Check step_history for NaN losses and plateau; return alerts."""
+    alerts: list[dict[str, Any]] = []
     history: list[dict[str, Any]] = metrics.get("step_history", [])
     losses = [s.get("loss") for s in history if "loss" in s]
 
@@ -338,7 +355,20 @@ def detect_anomalies(
                     "detail": f"Loss plateau over {len(recent)} steps (range={loss_range:.5f})",
                 }
             )
+    return alerts
 
+
+def detect_anomalies(
+    logs: list[str],
+    metrics: dict[str, Any],
+) -> dict[str, Any]:
+    """Analyze sanitized logs/metrics for anomalies.
+
+    Returns list of alerts with keys: type, severity, detail.
+    Inputs MUST already be sanitized (external text goes through sanitize_text
+    before reaching this tool via stream_remote_logs / monitor_training_metrics).
+    """
+    alerts = _check_log_anomalies(logs) + _check_metric_anomalies(metrics)
     return ok({"alerts": alerts}).to_dict()
 
 
@@ -354,9 +384,7 @@ def pause_resume_training(job_id: str, action: str) -> dict[str, Any]:
     if action not in _VALID_ACTIONS:
         return fail(f"invalid action {action!r}; must be 'pause' or 'resume'").to_dict()
 
-    configured, meta = gate("ssh")
-    cfg = _get_target_config("ssh") if configured else None
-    host = cfg["FTOS_SSH_HOST"] if cfg else "<FTOS_SSH_HOST>"
+    configured, meta, host, cfg = _ssh_gate(fallback_host="<FTOS_SSH_HOST>")
     remote_cmd = (
         f"kill -SIGSTOP $(cat ~/jobs/{job_id}.pid)"
         if action == "pause"
@@ -398,6 +426,7 @@ def early_stopping_check(
 
     Decision logic:
     - If fewer steps than patience → continue (insufficient history).
+    - If len(losses) == patience → continue (no 'before' window to compare).
     - If the best loss hasn't improved by min_delta for `patience` consecutive
       steps → stop.
     - Otherwise → continue.
@@ -407,7 +436,8 @@ def early_stopping_check(
         return fail("step_history is empty; cannot evaluate early stopping").to_dict()
 
     losses = [float(s["loss"]) for s in history if "loss" in s]
-    if len(losses) < patience:
+    # Fix #1: guard against empty losses[:-patience] when len == patience
+    if len(losses) <= patience:
         return ok(
             {
                 "decision": "continue",

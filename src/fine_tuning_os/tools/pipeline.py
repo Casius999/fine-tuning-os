@@ -22,6 +22,7 @@ import math
 import os
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import jinja2
@@ -48,6 +49,50 @@ def _is_docker_locally_allowed() -> bool:
     return configured and shutil.which("docker") is not None
 
 
+def _render_and_write(template_rel: str, dest_path: Path, **ctx: Any) -> str | None:
+    """Render *template_rel* with **ctx and write atomically to *dest_path*.
+
+    Returns an error string on failure, or None on success.
+    """
+    try:
+        content = render_template(template_rel, **ctx)
+    except jinja2.TemplateError as exc:
+        return f"template error: {exc}"
+    try:
+        write_text_atomic(dest_path, content)
+    except OSError as exc:
+        return str(exc)
+    return None
+
+
+def _run_subprocess_live(
+    cmd: list[str],
+    timeout: int,
+) -> tuple[str | None, dict[str, Any]]:
+    """Run *cmd* (list form) and return (error_str, result_data).
+
+    On success error_str is None; on failure result_data is {}.
+    """
+    try:
+        proc = subprocess.run(
+            cmd,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        raw = proc.stdout + proc.stderr
+        sanitized, n = sanitize_text(raw)
+        return None, {"output": sanitized, "masked_count": n, "returncode": proc.returncode}
+    except (
+        subprocess.TimeoutExpired,
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        OSError,
+    ) as exc:
+        return str(exc), {}
+
+
 # ---------------------------------------------------------------------------
 # Tool 11: build_docker_image (C2 — local_python + docker)
 # ---------------------------------------------------------------------------
@@ -71,24 +116,19 @@ def build_docker_image(
     except ValueError as exc:
         return fail(str(exc)).to_dict()
 
-    # Always render the Dockerfile (pure file I/O, no network)
-    try:
-        dockerfile_content = render_template(
-            "docker/Dockerfile.train.j2",
-            project_id=project_id,
-            base_image=base_image,
-            cache_models=cache_models,
-        )
-    except jinja2.TemplateError as exc:
-        return fail(f"template error: {exc}").to_dict()
-
     dockerfile_path = pdir / "docker" / "Dockerfile.train"
-    try:
-        write_text_atomic(dockerfile_path, dockerfile_content)
-    except OSError as exc:
-        return fail(str(exc)).to_dict()
+    err = _render_and_write(
+        "docker/Dockerfile.train.j2",
+        dockerfile_path,
+        project_id=project_id,
+        base_image=base_image,
+        cache_models=cache_models,
+    )
+    if err:
+        return fail(err).to_dict()
 
     context = str(pdir)
+    # Display command (readable, never executed via shell)
     command = f"docker build -t {tag} -f {dockerfile_path} {context}"
 
     allowed = _is_docker_locally_allowed()
@@ -99,30 +139,21 @@ def build_docker_image(
             dry_run=True,
         ).to_dict()
 
-    # Live branch
-    try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        raw = proc.stdout + proc.stderr
-        sanitized, n = sanitize_text(raw)
-        return ok(
-            {
-                "dockerfile_path": str(dockerfile_path),
-                "command": command,
-                "output": sanitized,
-                "masked_count": n,
-                "returncode": proc.returncode,
-            },
-            executed=True,
-            dry_run=False,
-        ).to_dict()
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return fail(str(exc)).to_dict()
+    # Fix #2: list form — no shell=True, prevents command injection
+    live_cmd = ["docker", "build", "-t", tag, "-f", str(dockerfile_path), context]
+    error, result_data = _run_subprocess_live(live_cmd, timeout=300)
+    if error:
+        return fail(error).to_dict()
+
+    return ok(
+        {
+            "dockerfile_path": str(dockerfile_path),
+            "command": command,
+            **result_data,
+        },
+        executed=True,
+        dry_run=False,
+    ).to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -141,29 +172,21 @@ def test_docker_build(image_tag: str) -> dict[str, Any]:
     if not allowed:
         return ok({"command": command}, executed=False, dry_run=True).to_dict()
 
-    try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        raw = proc.stdout + proc.stderr
-        sanitized, n = sanitize_text(raw)
-        return ok(
-            {
-                "command": command,
-                "output": sanitized,
-                "masked_count": n,
-                "returncode": proc.returncode,
-                "passed": proc.returncode == 0,
-            },
-            executed=True,
-            dry_run=False,
-        ).to_dict()
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return fail(str(exc)).to_dict()
+    # Fix #2: list form — no shell=True, prevents command injection
+    live_cmd = ["docker", "run", "--rm", image_tag, "pytest"]
+    error, result_data = _run_subprocess_live(live_cmd, timeout=120)
+    if error:
+        return fail(error).to_dict()
+
+    return ok(
+        {
+            "command": command,
+            **result_data,
+            "passed": result_data.get("returncode") == 0,
+        },
+        executed=True,
+        dry_run=False,
+    ).to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -187,21 +210,15 @@ def run_local_synthetic_train(
     except ValueError as exc:
         return fail(str(exc)).to_dict()
 
-    # Always render train.py
-    try:
-        train_content = render_template(
-            "train/train.py.j2",
-            project_id=project_id,
-            steps=steps,
-        )
-    except jinja2.TemplateError as exc:
-        return fail(f"template error: {exc}").to_dict()
-
     train_path = pdir / "src" / "train.py"
-    try:
-        write_text_atomic(train_path, train_content)
-    except OSError as exc:
-        return fail(str(exc)).to_dict()
+    err = _render_and_write(
+        "train/train.py.j2",
+        train_path,
+        project_id=project_id,
+        steps=steps,
+    )
+    if err:
+        return fail(err).to_dict()
 
     configured, meta = gate("local_python")
     cfg = _get_target_config("local_python") if configured else None
@@ -215,29 +232,21 @@ def run_local_synthetic_train(
             dry_run=True,
         ).to_dict()
 
-    # Live branch
-    try:
-        proc = subprocess.run(
-            [python_bin, str(train_path), "--steps", str(steps), "--project-root", str(pdir)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        raw = proc.stdout + proc.stderr
-        sanitized, n = sanitize_text(raw)
-        return ok(
-            {
-                "command": command,
-                "train_path": str(train_path),
-                "output": sanitized,
-                "masked_count": n,
-                "returncode": proc.returncode,
-            },
-            executed=True,
-            dry_run=False,
-        ).to_dict()
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return fail(str(exc)).to_dict()
+    # Live branch — already uses list form (was correct before)
+    live_cmd = [python_bin, str(train_path), "--steps", str(steps), "--project-root", str(pdir)]
+    error, result_data = _run_subprocess_live(live_cmd, timeout=120)
+    if error:
+        return fail(error).to_dict()
+
+    return ok(
+        {
+            "command": command,
+            "train_path": str(train_path),
+            **result_data,
+        },
+        executed=True,
+        dry_run=False,
+    ).to_dict()
 
 
 # ---------------------------------------------------------------------------

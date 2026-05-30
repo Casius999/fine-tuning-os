@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import jinja2
 import pytest
 
 from fine_tuning_os.store import Store
@@ -101,6 +102,53 @@ class TestBuildDockerImage:
             or "MODEL_CACHE" in dockerfile_path.read_text()
         )
 
+    # Fix #8: path-traversal project_id raises ValueError → success=False
+    def test_path_traversal_project_id_returns_fail(self, tmp_path: Path) -> None:
+        store = Store(root=tmp_path)
+        result = pipeline.build_docker_image(
+            project_id="../../../etc",
+            base_image="ubuntu:22.04",
+            tag="t:1",
+            store=store,
+        )
+        assert result["success"] is False
+
+    # Fix #8: TemplateError in render → success=False
+    def test_template_error_returns_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, pid = _init(tmp_path)
+
+        def broken_render(*args: object, **kwargs: object) -> str:
+            raise jinja2.TemplateError("oops")
+
+        monkeypatch.setattr("fine_tuning_os.tools.pipeline.render_template", broken_render)
+        result = pipeline.build_docker_image(
+            project_id=pid,
+            base_image="ubuntu:22.04",
+            tag="t:1",
+            store=store,
+        )
+        assert result["success"] is False
+
+    # Fix #8: OSError on write → success=False
+    def test_write_oserror_returns_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, pid = _init(tmp_path)
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr("fine_tuning_os.tools.pipeline.write_text_atomic", boom)
+        result = pipeline.build_docker_image(
+            project_id=pid,
+            base_image="ubuntu:22.04",
+            tag="t:1",
+            store=store,
+        )
+        assert result["success"] is False
+
 
 # ---------------------------------------------------------------------------
 # Tool 12: test_docker_build
@@ -140,6 +188,28 @@ class TestTestDockerBuild:
         # The email address should be redacted
         output = result["data"].get("output", "")
         assert "admin@corp.example.com" not in output
+
+    def test_live_branch_uses_list_not_shell(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """subprocess.run must be called with a list (not shell=True)."""
+        monkeypatch.setenv("FTOS_LOCAL_PYTHON", "/usr/bin/python3")
+        captured: list = []
+
+        def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.append((cmd, kwargs))
+            return MagicMock(stdout="", stderr="", returncode=0)
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("subprocess.run", side_effect=fake_run),
+        ):
+            pipeline.test_docker_build(image_tag="ftos:live")
+
+        assert captured, "subprocess.run was not called"
+        cmd, kwargs = captured[0]
+        assert isinstance(cmd, list), "cmd must be a list"
+        assert kwargs.get("shell") is False
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +274,32 @@ class TestRunLocalSyntheticTrain:
         assert result["success"] is True
         assert "10" in result["data"]["command"]  # default 10 steps
 
+    # Fix #8: TemplateError in train render → success=False
+    def test_template_error_returns_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, pid = _init(tmp_path)
+
+        def broken_render(*args: object, **kwargs: object) -> str:
+            raise jinja2.TemplateError("broken")
+
+        monkeypatch.setattr("fine_tuning_os.tools.pipeline.render_template", broken_render)
+        result = pipeline.run_local_synthetic_train(project_id=pid, store=store)
+        assert result["success"] is False
+
+    # Fix #8: OSError in write → success=False
+    def test_write_oserror_returns_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, pid = _init(tmp_path)
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr("fine_tuning_os.tools.pipeline.write_text_atomic", boom)
+        result = pipeline.run_local_synthetic_train(project_id=pid, store=store)
+        assert result["success"] is False
+
 
 # ---------------------------------------------------------------------------
 # Tool 14: get_local_metrics
@@ -232,6 +328,26 @@ class TestGetLocalMetrics:
         metrics_file = tmp_path / pid / "outputs" / "metrics.json"
         metrics_file.parent.mkdir(parents=True, exist_ok=True)
         metrics_file.write_text("not-json", encoding="utf-8")
+        result = pipeline.get_local_metrics(project_id=pid, store=store)
+        assert result["success"] is False
+
+    # Fix #8: OSError on read → success=False
+    def test_oserror_on_read_returns_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, pid = _init(tmp_path)
+        metrics_file = tmp_path / pid / "outputs" / "metrics.json"
+        metrics_file.parent.mkdir(parents=True, exist_ok=True)
+        metrics_file.write_text("{}", encoding="utf-8")
+
+        original_read = Path.read_text
+
+        def bad_read(self: Path, *args: object, **kwargs: object) -> str:
+            if self == metrics_file:
+                raise OSError("unreadable")
+            return original_read(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", bad_read)
         result = pipeline.get_local_metrics(project_id=pid, store=store)
         assert result["success"] is False
 
@@ -350,3 +466,67 @@ class TestGenerateUnitTests:
             store=store,
         )
         assert result["success"] is False
+
+    # Fix #8: OSError on write → success=False
+    def test_write_oserror_returns_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, pid = _init(tmp_path)
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise OSError("no space")
+
+        monkeypatch.setattr("fine_tuning_os.tools.pipeline.write_text_atomic", boom)
+        result = pipeline.generate_unit_tests(
+            project_id=pid,
+            targets=["train"],
+            store=store,
+        )
+        assert result["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# MCP wrapper smoke tests (Fix #12) — pipeline module
+# ---------------------------------------------------------------------------
+class TestMcpWrappersPipeline:
+    def test_mcp_get_local_metrics_missing_file(self, tmp_path: Path) -> None:
+        """_mcp_get_local_metrics forwards project_id correctly."""
+
+        # Override workspace_root so default Store points at tmp_path
+        orig_workspace = pipeline.workspace_root
+
+        def fake_workspace() -> Path:
+            return tmp_path
+
+        pipeline.workspace_root = fake_workspace  # type: ignore[assignment]
+        store = Store(root=tmp_path)
+        store.init_project("smoke_p", "ACME")
+        try:
+            result = pipeline._mcp_get_local_metrics("smoke_p")
+        finally:
+            pipeline.workspace_root = orig_workspace  # type: ignore[assignment]
+
+        # File doesn't exist → success=False (correct forwarding)
+        assert "success" in result
+
+    def test_mcp_generate_unit_tests_no_targets(self, tmp_path: Path) -> None:
+        """_mcp_generate_unit_tests with empty targets returns fail."""
+        orig_workspace = pipeline.workspace_root
+
+        def fake_workspace() -> Path:
+            return tmp_path
+
+        pipeline.workspace_root = fake_workspace  # type: ignore[assignment]
+        store = Store(root=tmp_path)
+        store.init_project("smoke_p2", "ACME")
+        try:
+            result = pipeline._mcp_generate_unit_tests("smoke_p2", [])
+        finally:
+            pipeline.workspace_root = orig_workspace  # type: ignore[assignment]
+
+        assert result["success"] is False
+
+    def test_dry_run_remote_config_smoke(self) -> None:
+        result = pipeline.dry_run_remote_config({"env_names": []})
+        assert "success" in result
+        assert result["success"] is True
