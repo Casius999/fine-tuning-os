@@ -18,6 +18,11 @@ from .targets import resolve_target
 
 mcp = FastMCP("fine-tuning-os")
 
+from .tools import prep, synthetic  # noqa: E402
+
+prep.register(mcp)
+synthetic.register(mcp)
+
 _TARGET_KINDS: tuple[str, ...] = (
     "ssh",
     "registry",
