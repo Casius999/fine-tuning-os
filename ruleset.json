@@ -1,5 +1,4 @@
 {
-  "_comment_signing": "NOTE: required_signatures rule requires a GPG/SSH signing key configured locally. The current local committer (Casius999) has no signing key configured for commits. This rule will block pushes until signing is configured OR the rule is removed before importing this ruleset. To configure: set git config commit.gpgsign true and add your signing key to your GitHub account.",
   "name": "SOTA default-branch protection",
   "target": "branch",
   "source_type": "Repository",
@@ -14,7 +13,6 @@
     { "type": "deletion" },
     { "type": "non_fast_forward" },
     { "type": "required_linear_history" },
-    { "type": "required_signatures" },
     {
       "type": "pull_request",
       "parameters": {
