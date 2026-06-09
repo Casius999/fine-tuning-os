@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_prep.py
 """Tests for prep.py tools (tools 1-5 + tool 8/9/10 from spec)."""
 

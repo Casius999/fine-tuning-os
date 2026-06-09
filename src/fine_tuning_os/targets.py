@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/targets.py
 """C2 external-target gating from environment variables.
 

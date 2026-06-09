@@ -1,0 +1,8 @@
+fine-tuning-os
+Copyright 2026 Casius999
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+This project uses third-party libraries listed in pyproject.toml.
+Each library retains its own license.

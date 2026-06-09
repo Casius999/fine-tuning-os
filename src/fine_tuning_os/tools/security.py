@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/security.py
 """Lot 4 — Security tools 33-38.
 

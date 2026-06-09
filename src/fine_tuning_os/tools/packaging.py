@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/packaging.py
 """Lot 5 — Packaging tools 39-46.
 

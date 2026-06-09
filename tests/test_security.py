@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_security.py
 """TDD tests for security.py tools (33–38).
 

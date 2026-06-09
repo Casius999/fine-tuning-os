@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_demo_bundle.py
 """Smoke test for scripts/demo_bundle.py — end-to-end reproducibility check.
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/maintenance.py
 """Lot 6 — Model maintenance tools 61-64.
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_evaluation.py
 """TDD tests for evaluation.py tools (26–32).
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/render.py
 """Deterministic file utilities: hashing, atomic writes, Markdown rendering."""
 

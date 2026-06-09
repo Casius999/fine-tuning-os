@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/pipeline.py
 """Lot 3 — Pipeline tools 11-17.
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/evaluation.py
 """Lot 4 — Evaluation tools 26-32.
 

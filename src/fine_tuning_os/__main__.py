@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/__main__.py
 """Enable `python -m fine_tuning_os` to launch the stdio MCP server.
 

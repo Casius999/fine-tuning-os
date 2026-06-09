@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/models.py
 """Shared Pydantic v2 DTOs for Fine-Tuning OS Lot 2+."""
 

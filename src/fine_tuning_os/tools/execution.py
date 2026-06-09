@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/execution.py
 """Lot 3 — Execution tools 18-25.
 

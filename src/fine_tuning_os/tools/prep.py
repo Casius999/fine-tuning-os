@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/prep.py
 """Lot 2 — Prep & Synthetic tools 1-6, 8, 9, 10 (C1, offline, deterministic).
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_crypto.py
 import pytest
 from cryptography.exceptions import InvalidTag

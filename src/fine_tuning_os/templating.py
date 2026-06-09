@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/templating.py
 """Shared Jinja2 environment for rendering YAML/Python/text templates."""
 
