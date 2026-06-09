@@ -548,9 +548,7 @@ class TestDocsMcpWrappers:
 class TestDocsErrorPaths:
     """Cover exception branches: template error, write error, _try_pdf error path."""
 
-    def test_generate_contract_template_render_error(
-        self, store: Any, project_id: str
-    ) -> None:
+    def test_generate_contract_template_render_error(self, store: Any, project_id: str) -> None:
         """If render_template raises, generate_contract returns fail."""
         with patch(
             "fine_tuning_os.tools.docs.render_template",
@@ -564,9 +562,7 @@ class TestDocsErrorPaths:
         assert result["success"] is False
         assert "template error" in result["error"]
 
-    def test_generate_nda_template_render_error(
-        self, store: Any, project_id: str
-    ) -> None:
+    def test_generate_nda_template_render_error(self, store: Any, project_id: str) -> None:
         with patch(
             "fine_tuning_os.tools.docs.render_template",
             side_effect=ValueError("bad nda template"),
@@ -579,9 +575,7 @@ class TestDocsErrorPaths:
             )
         assert result["success"] is False
 
-    def test_generate_performance_report_template_error(
-        self, store: Any, project_id: str
-    ) -> None:
+    def test_generate_performance_report_template_error(self, store: Any, project_id: str) -> None:
         with patch(
             "fine_tuning_os.tools.docs.render_template",
             side_effect=ValueError("bad perf template"),
@@ -606,11 +600,9 @@ class TestDocsErrorPaths:
             )
         assert result["success"] is True
         # Generic exception → pdf_skipped set to the error message
-        assert "pdf_skipped" in result["data"] or result["data"].get("pdf_path") is None
+        assert "pdf_skipped" in result["data"]
 
-    def test_generate_user_guide_template_error(
-        self, store: Any, project_id: str
-    ) -> None:
+    def test_generate_user_guide_template_error(self, store: Any, project_id: str) -> None:
         with patch(
             "fine_tuning_os.tools.docs.render_template",
             side_effect=ValueError("bad user guide"),
@@ -618,9 +610,7 @@ class TestDocsErrorPaths:
             result = docs.generate_user_guide(project_id=project_id, store=store)
         assert result["success"] is False
 
-    def test_generate_deployment_guide_template_error(
-        self, store: Any, project_id: str
-    ) -> None:
+    def test_generate_deployment_guide_template_error(self, store: Any, project_id: str) -> None:
         with patch(
             "fine_tuning_os.tools.docs.render_template",
             side_effect=ValueError("bad deploy guide"),

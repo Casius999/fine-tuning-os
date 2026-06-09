@@ -690,3 +690,22 @@ class TestLiveConfiguredBranches:
             result = packaging.encrypt_deliverable(paths=[str(src)])
         assert result["success"] is False
         assert "disk full" in result["error"]
+
+    def test_delivery_note_pdf_generic_exception_uses_pdf_skipped(
+        self, store: Any, project_id: str, tmp_path: Path
+    ) -> None:
+        """PDF renderer generic exception → success=True, pdf_skipped present, md_path+sha256 intact."""
+        with patch(
+            "fine_tuning_os.tools.packaging.markdown_file_to_pdf",
+            side_effect=RuntimeError("renderer crashed"),
+        ):
+            result = packaging.generate_delivery_note(
+                project_id=project_id,
+                files=[{"name": "model.enc", "sha256": "a" * 64}],
+                store=store,
+            )
+        assert result["success"] is True
+        assert "pdf_skipped" in result["data"]
+        assert "pdf_path" not in result["data"]
+        assert "md_path" in result["data"]
+        assert len(result["data"]["sha256"]) == 64

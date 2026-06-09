@@ -15,6 +15,7 @@ Never raise to caller — wrap I/O in try/except and return fail(str(exc)).
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,9 +47,96 @@ def _sftp_gate() -> tuple[bool, dict[str, Any], dict[str, Any] | None]:
     return configured, meta, cfg
 
 
-# ---------------------------------------------------------------------------
-# Tool 39: merge_lora_weights (C2 — local_python gate)
-# ---------------------------------------------------------------------------
+def _run_subprocess(
+    command: str,
+    *,
+    timeout: int,
+    use_list: list[str] | None = None,
+) -> tuple[str, str, int]:
+    """Run a subprocess and return (stdout, stderr, returncode).
+
+    Raises subprocess.TimeoutExpired or OSError on failure.
+    """
+    if use_list is not None:
+        result = subprocess.run(
+            use_list,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    else:
+        result = subprocess.run(
+            command,
+            shell=True,  # noqa: S602
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    return result.stdout, result.stderr, result.returncode
+
+
+def _execute_or_dry(
+    *,
+    cmd: str,
+    gate_kind: str,
+    timeout: int,
+    dry_extra: dict[str, Any],
+    live_extra_fn: Any,
+    use_list: list[str] | None = None,
+    python_bin_replace: bool = False,
+) -> dict[str, Any]:
+    """Shared C2 gate/subprocess/dry-run pattern.
+
+    Checks the gate; if configured, runs the command and returns the live result.
+    Otherwise returns dry_run ok with dry_extra.
+
+    live_extra_fn(stdout, stderr, returncode) -> dict[str, Any]  (live data fields)
+    """
+    configured, meta = gate(gate_kind)
+    if not configured:
+        return ok({"command": cmd, **dry_extra}, executed=False, dry_run=True).to_dict()
+
+    cfg = _get_target_config(gate_kind)
+    run_cmd = cmd
+    run_list = use_list
+    if python_bin_replace and cfg:
+        python_bin = cfg.get("FTOS_LOCAL_PYTHON", "python3")  # type: ignore[union-attr]
+        run_cmd = cmd.replace("python3 ", f"{python_bin} ", 1)
+        if run_list:
+            run_list = [python_bin if x == "python3" else x for x in run_list]
+
+    try:
+        stdout, stderr, returncode = _run_subprocess(run_cmd, timeout=timeout, use_list=run_list)
+        sanitized_out, n = sanitize_text(stdout + stderr)
+        live_data = live_extra_fn(sanitized_out, n, returncode)
+        return ok({"command": cmd, **live_data}, **meta).to_dict()
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return fail(str(exc)).to_dict()
+
+
+def _try_pdf_packaging(dest: Path) -> dict[str, Any]:
+    """Attempt PDF; return dict entries to merge into result_data (pdf_path or pdf_skipped)."""
+    try:
+        pdf_dest = dest.with_suffix(".pdf")
+        markdown_file_to_pdf(dest, pdf_dest)
+        return {"pdf_path": str(pdf_dest)}
+    except ImportError:
+        return {"pdf_skipped": "weasyprint not installed"}
+    except Exception as exc:  # noqa: BLE001
+        return {"pdf_skipped": str(exc)}
+
+
+def _build_merge_cmd(base_model: str, adapter_path: str, output_path: str) -> str:
+    """Build the LoRA merge python3 inline command string."""
+    return (
+        f'python3 -c "from peft import PeftModel; '
+        f"from transformers import AutoModelForCausalLM, AutoTokenizer; import torch; "
+        f"model = AutoModelForCausalLM.from_pretrained('{base_model}', torch_dtype=torch.float16); "
+        f"model = PeftModel.from_pretrained(model, '{adapter_path}').merge_and_unload(); "
+        f"model.save_pretrained('{output_path}'); "
+        f"AutoTokenizer.from_pretrained('{base_model}').save_pretrained('{output_path}')\""
+    )
 
 
 def merge_lora_weights(
@@ -57,73 +145,58 @@ def merge_lora_weights(
     output_path: str,
     local_python: bool = False,
 ) -> dict[str, Any]:
-    """Emit the LoRA merge command (base + adapter -> merged 16-bit).
-
-    Routes to local Python if FTOS_LOCAL_PYTHON is configured and
-    local_python=True; otherwise emits the exact command (dry_run).
-    """
-    cmd = (
-        f'python3 -c "'
-        f"from peft import PeftModel; "
-        f"from transformers import AutoModelForCausalLM, AutoTokenizer; "
-        f"import torch; "
-        f"model = AutoModelForCausalLM.from_pretrained('{base_model}', "
-        f"torch_dtype=torch.float16); "
-        f"model = PeftModel.from_pretrained(model, '{adapter_path}'); "
-        f"model = model.merge_and_unload(); "
-        f"model.save_pretrained('{output_path}'); "
-        f"AutoTokenizer.from_pretrained('{base_model}')"
-        f".save_pretrained('{output_path}')\""
-    )
-
+    """Emit the LoRA merge command (base + adapter -> merged 16-bit)."""
+    cmd = _build_merge_cmd(base_model, adapter_path, output_path)
+    dry_extra = {
+        "base_model": base_model,
+        "adapter_path": adapter_path,
+        "output_path": output_path,
+        "note": "Run this command in your Python environment with peft+transformers installed",
+    }
     if local_python:
-        configured, meta = gate("local_python")
-        if configured:
-            cfg = _get_target_config("local_python")
-            python_bin = cfg["FTOS_LOCAL_PYTHON"]  # type: ignore[index]
-            live_cmd = cmd.replace("python3 ", f"{python_bin} ", 1)
-            import subprocess  # noqa: PLC0415
+        return _execute_or_dry(
+            cmd=cmd,
+            gate_kind="local_python",
+            timeout=600,
+            dry_extra=dry_extra,
+            live_extra_fn=lambda out, n, rc: {
+                "output": out,
+                "masked_count": n,
+                "returncode": rc,
+                "output_path": output_path,
+            },
+            python_bin_replace=True,
+        )
+    return ok({"command": cmd, **dry_extra}, executed=False, dry_run=True).to_dict()
 
-            try:
-                result = subprocess.run(
-                    live_cmd,
-                    shell=True,  # noqa: S602
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
-                )
-                sanitized_out, n = sanitize_text(result.stdout + result.stderr)
-                return ok(
-                    {
-                        "command": cmd,
-                        "output": sanitized_out,
-                        "masked_count": n,
-                        "returncode": result.returncode,
-                        "output_path": output_path,
-                    },
-                    **meta,
-                ).to_dict()
-            except (subprocess.TimeoutExpired, OSError) as exc:
-                return fail(str(exc)).to_dict()
-
-    return ok(
-        {
-            "command": cmd,
-            "base_model": base_model,
-            "adapter_path": adapter_path,
-            "output_path": output_path,
-            "note": "Run this command in your Python environment with peft+transformers installed",
-        },
-        executed=False,
-        dry_run=True,
-    ).to_dict()
-
-
-# ---------------------------------------------------------------------------
-# Tool 40: quantize_model (C2 — local_python gate)
-# ---------------------------------------------------------------------------
 
 _VALID_QUANT_FORMATS = frozenset(["gguf", "gptq", "awq"])
+
+
+def _build_quantize_cmd(model_path: str, fmt: str, bits: int, out: str) -> str:
+    """Build the quantization command string for the given format."""
+    if fmt == "gguf":
+        return (
+            f"python3 llama.cpp/convert-hf-to-gguf.py {model_path} "
+            f"--outfile {out}.gguf --outtype q{bits}_0"
+        )
+    if fmt == "gptq":
+        return (
+            f'python3 -c "from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig; '
+            f"from transformers import AutoTokenizer; config = BaseQuantizeConfig(bits={bits}, group_size=128); "
+            f"model = AutoGPTQForCausalLM.from_pretrained('{model_path}', config); "
+            f"tokenizer = AutoTokenizer.from_pretrained('{model_path}'); "
+            f"model.quantize([]); model.save_quantized('{out}')\""
+        )
+    # awq
+    return (
+        f'python3 -c "from awq import AutoAWQForCausalLM; '
+        f"from transformers import AutoTokenizer; "
+        f"model = AutoAWQForCausalLM.from_pretrained('{model_path}'); "
+        f"tokenizer = AutoTokenizer.from_pretrained('{model_path}'); "
+        f"quant_config = {{'zero_point': True, 'q_group_size': 128, 'w_bit': {bits}}}; "
+        f"model.quantize(tokenizer, quant_config=quant_config); model.save_quantized('{out}')\""
+    )
 
 
 def quantize_model(
@@ -139,64 +212,27 @@ def quantize_model(
         return fail(f"unknown format: {format!r}; valid: {sorted(_VALID_QUANT_FORMATS)}").to_dict()
 
     out = output_path or f"{model_path}-{fmt}-{bits}bit"
-
-    if fmt == "gguf":
-        cmd = (
-            f"python3 llama.cpp/convert-hf-to-gguf.py {model_path} "
-            f"--outfile {out}.gguf --outtype q{bits}_0"
-        )
-    elif fmt == "gptq":
-        cmd = (
-            f'python3 -c "'
-            f"from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig; "
-            f"from transformers import AutoTokenizer; "
-            f"config = BaseQuantizeConfig(bits={bits}, group_size=128); "
-            f"model = AutoGPTQForCausalLM.from_pretrained('{model_path}', config); "
-            f"tokenizer = AutoTokenizer.from_pretrained('{model_path}'); "
-            f"model.quantize([]); "
-            f"model.save_quantized('{out}')\""
-        )
-    else:  # awq
-        cmd = (
-            f'python3 -c "'
-            f"from awq import AutoAWQForCausalLM; "
-            f"from transformers import AutoTokenizer; "
-            f"model = AutoAWQForCausalLM.from_pretrained('{model_path}'); "
-            f"tokenizer = AutoTokenizer.from_pretrained('{model_path}'); "
-            f"quant_config = {{'zero_point': True, 'q_group_size': 128, 'w_bit': {bits}}}; "
-            f"model.quantize(tokenizer, quant_config=quant_config); "
-            f"model.save_quantized('{out}')\""
-        )
+    cmd = _build_quantize_cmd(model_path, fmt, bits, out)
 
     if local_python:
-        configured, meta = gate("local_python")
-        if configured:
-            cfg = _get_target_config("local_python")
-            python_bin = cfg["FTOS_LOCAL_PYTHON"]  # type: ignore[index]
-            live_cmd = cmd.replace("python3 ", f"{python_bin} ", 1)
-            import subprocess  # noqa: PLC0415
-
-            try:
-                result = subprocess.run(
-                    live_cmd,
-                    shell=True,  # noqa: S602
-                    capture_output=True,
-                    text=True,
-                    timeout=1800,
-                )
-                sanitized_out, n = sanitize_text(result.stdout + result.stderr)
-                return ok(
-                    {
-                        "command": cmd,
-                        "output": sanitized_out,
-                        "masked_count": n,
-                        "returncode": result.returncode,
-                        "output_path": out,
-                    },
-                    **meta,
-                ).to_dict()
-            except (subprocess.TimeoutExpired, OSError) as exc:
-                return fail(str(exc)).to_dict()
+        return _execute_or_dry(
+            cmd=cmd,
+            gate_kind="local_python",
+            timeout=1800,
+            dry_extra={
+                "model_path": model_path,
+                "format": fmt,
+                "bits": bits,
+                "output_path": out,
+            },
+            live_extra_fn=lambda o, n, rc: {
+                "output": o,
+                "masked_count": n,
+                "returncode": rc,
+                "output_path": out,
+            },
+            python_bin_replace=True,
+        )
 
     return ok(
         {
@@ -211,11 +247,42 @@ def quantize_model(
     ).to_dict()
 
 
-# ---------------------------------------------------------------------------
-# Tool 41: build_inference_container (C2 — docker gate)
-# ---------------------------------------------------------------------------
-
 _VALID_ENGINES = frozenset(["vllm", "sglang", "generic"])
+
+
+def _write_dockerfile(
+    model_path: str,
+    engine: str,
+    store: Store | None,
+    project_id: str | None,
+) -> tuple[Path, str] | dict[str, Any]:
+    """Render and write the Dockerfile; return (dockerfile_path, content) or fail dict."""
+    try:
+        dockerfile_content = render_template(
+            "docker/Dockerfile.infer.j2",
+            engine=engine,
+            model_path=model_path,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return fail(f"template error: {exc}").to_dict()
+
+    s = _get_store(store)
+    if project_id:
+        try:
+            dest_dir = s.project_dir(project_id) / "docker"
+        except ValueError as exc:
+            return fail(str(exc)).to_dict()
+    else:
+        dest_dir = Path("docker")
+
+    dockerfile_path = dest_dir / "Dockerfile.infer"
+
+    try:
+        write_text_atomic(dockerfile_path, dockerfile_content)
+    except OSError as exc:
+        return fail(f"write error: {exc}").to_dict()
+
+    return dockerfile_path, dockerfile_content
 
 
 def build_inference_container(
@@ -234,81 +301,60 @@ def build_inference_container(
     if eng not in _VALID_ENGINES:
         return fail(f"unknown engine: {engine!r}; valid: {sorted(_VALID_ENGINES)}").to_dict()
 
-    try:
-        dockerfile_content = render_template(
-            "docker/Dockerfile.infer.j2",
-            engine=eng,
-            model_path=model_path,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return fail(f"template error: {exc}").to_dict()
-
-    # Determine output path
-    s = _get_store(store)
-    if project_id:
-        try:
-            dest_dir = s.project_dir(project_id) / "docker"
-        except ValueError as exc:
-            return fail(str(exc)).to_dict()
-    else:
-        dest_dir = Path("docker")
-
-    dockerfile_path = dest_dir / "Dockerfile.infer"
-
-    try:
-        write_text_atomic(dockerfile_path, dockerfile_content)
-    except OSError as exc:
-        return fail(f"write error: {exc}").to_dict()
+    write_result = _write_dockerfile(model_path, eng, store, project_id)
+    if isinstance(write_result, dict):
+        return write_result
+    dockerfile_path, dockerfile_content = write_result
 
     image_tag = f"ftos-infer-{project_id or 'model'}:latest"
     cmd = f"docker build -t {image_tag} -f {dockerfile_path} ."
 
-    # Gate: docker available locally
     docker_available = shutil.which("docker") is not None
     local_configured, meta = gate("local_python")
     live = docker_available and local_configured
 
-    if live:
-        import subprocess  # noqa: PLC0415
+    if not live:
+        return ok(
+            {
+                "command": cmd,
+                "dockerfile_path": str(dockerfile_path),
+                "dockerfile_content": dockerfile_content,
+                "image_tag": image_tag,
+            },
+            executed=False,
+            dry_run=True,
+        ).to_dict()
 
-        try:
-            result = subprocess.run(
-                ["docker", "build", "-t", image_tag, "-f", str(dockerfile_path), "."],
-                capture_output=True,
-                text=True,
-                timeout=600,
-                shell=False,
-            )
-            sanitized_out, n = sanitize_text(result.stdout + result.stderr)
-            return ok(
-                {
-                    "command": cmd,
-                    "dockerfile_path": str(dockerfile_path),
-                    "image_tag": image_tag,
-                    "output": sanitized_out,
-                    "masked_count": n,
-                    "returncode": result.returncode,
-                },
-                **meta,
-            ).to_dict()
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            return fail(str(exc)).to_dict()
-
-    return ok(
-        {
-            "command": cmd,
-            "dockerfile_path": str(dockerfile_path),
-            "dockerfile_content": dockerfile_content,
-            "image_tag": image_tag,
-        },
-        executed=False,
-        dry_run=True,
-    ).to_dict()
+    return _run_docker_build(cmd, dockerfile_path, image_tag, meta)
 
 
-# ---------------------------------------------------------------------------
-# Tool 42: generate_inference_config (C1 — offline)
-# ---------------------------------------------------------------------------
+def _run_docker_build(
+    cmd: str,
+    dockerfile_path: Path,
+    image_tag: str,
+    meta: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute docker build and return ok/fail dict."""
+    try:
+        stdout, stderr, returncode = _run_subprocess(
+            cmd,
+            timeout=600,
+            use_list=["docker", "build", "-t", image_tag, "-f", str(dockerfile_path), "."],
+        )
+        sanitized_out, n = sanitize_text(stdout + stderr)
+        return ok(
+            {
+                "command": cmd,
+                "dockerfile_path": str(dockerfile_path),
+                "image_tag": image_tag,
+                "output": sanitized_out,
+                "masked_count": n,
+                "returncode": returncode,
+            },
+            **meta,
+        ).to_dict()
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return fail(str(exc)).to_dict()
 
 
 def generate_inference_config(
@@ -360,9 +406,86 @@ def generate_inference_config(
     return ok(result_data).to_dict()
 
 
-# ---------------------------------------------------------------------------
-# Tool 43: test_inference_api (C2 — base_url / endpoint gate)
-# ---------------------------------------------------------------------------
+def _build_curl_cmds(
+    prompts: list[str],
+    base_url: str | None,
+    model: str,
+    max_tokens: int,
+    api_key_env: str,
+) -> list[str]:
+    """Build example curl commands for up to 3 prompts."""
+    curl_cmds = []
+    base = base_url or "$INFERENCE_BASE_URL"
+    for prompt in prompts[:3]:
+        sp = prompt.replace('"', '\\"')
+        body = f'{{"model": "{model}", "messages": [{{"role": "user", "content": "{sp}"}}], "max_tokens": {max_tokens}}}'
+        curl_cmds.append(
+            f"curl -X POST {base}/v1/chat/completions"
+            f' -H "Authorization: Bearer ${api_key_env}"'
+            f' -H "Content-Type: application/json"'
+            f" -d '{body}'"
+        )
+    return curl_cmds
+
+
+def _call_inference_endpoint(
+    prompts: list[str],
+    base_url: str,
+    model: str,
+    max_tokens: int,
+    api_key_env: str,
+) -> list[dict[str, Any]]:
+    """Send live requests to the inference endpoint; return results list."""
+    import os  # noqa: PLC0415
+
+    api_key = os.environ.get(api_key_env, "")
+    results: list[dict[str, Any]] = []
+    for prompt in prompts:
+        results.append(
+            _call_single_prompt(prompt, base_url, model, max_tokens, api_key, len(results))
+        )
+    return results
+
+
+def _call_single_prompt(
+    prompt: str,
+    base_url: str,
+    model: str,
+    max_tokens: int,
+    api_key: str,
+    index: int,
+) -> dict[str, Any]:
+    """Send a single prompt to the inference endpoint and return the result entry."""
+    import httpx  # noqa: PLC0415
+
+    try:
+        sanitized_prompt, _ = sanitize_text(prompt)
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": sanitized_prompt}],
+            "max_tokens": max_tokens,
+        }
+        headers: dict[str, str] = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        resp = httpx.post(
+            f"{base_url}/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        sanitized_content, n_masked = sanitize_text(resp.text)
+        return {
+            "prompt_index": index,
+            "status_code": resp.status_code,
+            "response": sanitized_content,
+            "masked_count": n_masked,
+            "ok": True,
+        }
+    except Exception as exc:  # noqa: BLE001
+        sanitized_err, _ = sanitize_text(str(exc))
+        return {"prompt_index": index, "error": sanitized_err, "ok": False}
 
 
 def test_inference_api(
@@ -380,23 +503,7 @@ def test_inference_api(
     if not prompts:
         return fail("prompts list must not be empty").to_dict()
 
-    # Build curl commands for dry-run documentation
-    curl_cmds = []
-    for prompt in prompts[:3]:  # Show up to 3 example commands
-        safe_prompt = prompt.replace('"', '\\"')
-        curl_cmds.append(
-            f'curl -X POST {base_url or "$INFERENCE_BASE_URL"}/v1/chat/completions \\\n'
-            f'  -H "Authorization: Bearer ${api_key_env}" \\\n'
-            f'  -H "Content-Type: application/json" \\\n'
-            f"  -d '"
-            + '{"model": "'
-            + model
-            + '", "messages": [{"role": "user", "content": "'
-            + safe_prompt
-            + '"}], "max_tokens": '
-            + str(max_tokens)
-            + "}'"
-        )
+    curl_cmds = _build_curl_cmds(prompts, base_url, model, max_tokens, api_key_env)
 
     if not base_url:
         return ok(
@@ -410,56 +517,12 @@ def test_inference_api(
             dry_run=True,
         ).to_dict()
 
-    # Live call via httpx
     try:
-        import httpx  # noqa: PLC0415
-        import os  # noqa: PLC0415
+        import httpx  # noqa: PLC0415, F401
     except ImportError:
         return fail("httpx is required for live API testing; install it first").to_dict()
 
-    api_key = os.environ.get(api_key_env, "")
-    results = []
-
-    for prompt in prompts:
-        try:
-            sanitized_prompt, _ = sanitize_text(prompt)
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": sanitized_prompt}],
-                "max_tokens": max_tokens,
-            }
-            headers = {}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-
-            resp = httpx.post(
-                f"{base_url}/v1/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            raw_content = resp.text
-            sanitized_content, n_masked = sanitize_text(raw_content)
-            results.append(
-                {
-                    "prompt_index": len(results),
-                    "status_code": resp.status_code,
-                    "response": sanitized_content,
-                    "masked_count": n_masked,
-                    "ok": True,
-                }
-            )
-        except Exception as exc:  # noqa: BLE001
-            sanitized_err, _ = sanitize_text(str(exc))
-            results.append(
-                {
-                    "prompt_index": len(results),
-                    "error": sanitized_err,
-                    "ok": False,
-                }
-            )
-
+    results = _call_inference_endpoint(prompts, base_url, model, max_tokens, api_key_env)
     return ok(
         {
             "command": curl_cmds[0] if curl_cmds else "",
@@ -473,9 +536,13 @@ def test_inference_api(
     ).to_dict()
 
 
-# ---------------------------------------------------------------------------
-# Tool 44: encrypt_deliverable (C1 — crypto)
-# ---------------------------------------------------------------------------
+def _archive_paths(input_paths: list[Path], out_dir: Path) -> Path:
+    """Archive multiple paths into a tar.gz; return archive path."""
+    archive_path = out_dir / "deliverables.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        for p in input_paths:
+            tf.add(p, arcname=p.name)
+    return archive_path
 
 
 def encrypt_deliverable(
@@ -484,51 +551,33 @@ def encrypt_deliverable(
 ) -> dict[str, Any]:
     """AES-256-GCM encrypt deliverable file(s).
 
-    The key is returned ONCE in data (hex) and is NEVER persisted to disk
-    or project.json. If multiple paths are given, they are archived into a
-    single .tar.gz before encryption.
+    Key returned ONCE in data (hex), NEVER persisted. Multiple paths are
+    archived into a single .tar.gz before encryption.
     """
     if not paths:
         return fail("paths list must not be empty").to_dict()
-
     input_paths = [Path(p) for p in paths]
     for p in input_paths:
         if not p.exists():
             return fail(f"file not found: {p}").to_dict()
-
     out_dir = Path(output_dir) if output_dir else input_paths[0].parent
-
+    archive_path: Path | None = None
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
-
-        # If multiple files, archive them first
         if len(input_paths) > 1:
-            archive_path = out_dir / "deliverables.tar.gz"
-            with tarfile.open(archive_path, "w:gz") as tf:
-                for p in input_paths:
-                    tf.add(p, arcname=p.name)
-            src_path = archive_path
+            archive_path = _archive_paths(input_paths, out_dir)
+            src_path: Path = archive_path
         else:
             src_path = input_paths[0]
-
-        # Generate a fresh key — never persisted
         key = generate_key()
         key_hex = key.hex()
-
-        # Encrypt
         enc_path = out_dir / (src_path.name + ".enc")
         encrypt_file(src_path, enc_path, key)
-
-        # Hash of encrypted file for integrity
         enc_sha256 = sha256_file(enc_path)
-
-        # Clean up temp archive if created
-        if len(input_paths) > 1:
-            archive_path.unlink(missing_ok=True)  # type: ignore[union-attr]
-
+        if archive_path is not None:
+            archive_path.unlink(missing_ok=True)
     except (OSError, ValueError) as exc:
         return fail(str(exc)).to_dict()
-
     return ok(
         {
             "encrypted_path": str(enc_path),
@@ -543,32 +592,45 @@ def encrypt_deliverable(
     ).to_dict()
 
 
-# ---------------------------------------------------------------------------
-# Tool 45: upload_deliverable (C2 — sftp)
-# ---------------------------------------------------------------------------
+def _sftp_put(host: str, user: str, key_path: str, src: Path, remote_dest: str) -> None:
+    """Open a paramiko SFTP session and upload src to remote_dest.
+
+    Raises paramiko.SSHException or OSError; always closes transport.
+    """
+    transport = paramiko.Transport((host, 22))
+    transport.banner_timeout = 30
+    transport.auth_timeout = 30
+    try:
+        transport.connect(
+            username=user,
+            pkey=paramiko.RSAKey.from_private_key_file(key_path),
+        )
+        sftp = paramiko.SFTPClient.from_transport(transport)  # type: ignore[arg-type]
+        try:
+            sftp.put(str(src), remote_dest)
+        finally:
+            sftp.close()
+    finally:
+        transport.close()
 
 
 def upload_deliverable(
     path: str,
     destination: str = ".",
 ) -> dict[str, Any]:
-    """Upload the encrypted deliverable over SFTP (paramiko) if configured.
+    """Upload encrypted deliverable over SFTP (paramiko) if configured.
 
-    dry_run: emits the exact sftp command with $FTOS_SFTP_* NAME placeholders.
-    live: uses paramiko with the actual config values (never surfaced in output).
+    dry_run: emits sftp command with $FTOS_SFTP_* NAME placeholders.
+    live: uses paramiko (values never surfaced in output).
     """
     src = Path(path)
     fname = src.name
-
-    # Build dry-run command with env var NAME refs (never values)
     remote_dest = f"{destination}/{fname}" if destination != "." else fname
     cmd = (
         f"sftp -i $FTOS_SFTP_KEY $FTOS_SFTP_USER@$FTOS_SFTP_HOST:{destination} "
         f"<<< $'put {path}'"
     )
-
     configured, meta, cfg = _sftp_gate()
-
     if not configured:
         return ok(
             {
@@ -579,27 +641,19 @@ def upload_deliverable(
             },
             **meta,
         ).to_dict()
-
     if not src.exists():
         return fail(f"file not found: {path}").to_dict()
-
-    host = cfg["FTOS_SFTP_HOST"]  # type: ignore[index]
-    user = cfg["FTOS_SFTP_USER"]  # type: ignore[index]
-    key_path = cfg["FTOS_SFTP_KEY"]  # type: ignore[index]
-
     try:
-        transport = paramiko.Transport((host, 22))
-        transport.connect(username=user, pkey=paramiko.RSAKey.from_private_key_file(key_path))
-        sftp = paramiko.SFTPClient.from_transport(transport)  # type: ignore[arg-type]
-        try:
-            sftp.put(str(src), remote_dest)
-        finally:
-            sftp.close()
-            transport.close()
+        _sftp_put(
+            cfg["FTOS_SFTP_HOST"],  # type: ignore[index]
+            cfg["FTOS_SFTP_USER"],  # type: ignore[index]
+            cfg["FTOS_SFTP_KEY"],  # type: ignore[index]
+            src,
+            remote_dest,
+        )
     except (paramiko.SSHException, OSError) as exc:
         sanitized_err, _ = sanitize_text(str(exc))
         return fail(sanitized_err).to_dict()
-
     return ok(
         {
             "command": cmd,
@@ -612,9 +666,23 @@ def upload_deliverable(
     ).to_dict()
 
 
-# ---------------------------------------------------------------------------
-# Tool 46: generate_delivery_note (C1 — render)
-# ---------------------------------------------------------------------------
+def _enrich_files(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add sha256 and name to each file entry if missing."""
+    enriched: list[dict[str, Any]] = []
+    for f in files:
+        entry = dict(f)
+        fp = Path(f.get("path", f.get("name", "")))
+        if "sha256" not in entry and fp.exists():
+            try:
+                entry["sha256"] = sha256_file(fp)
+            except OSError:
+                entry["sha256"] = "[error computing sha256]"
+        elif "sha256" not in entry:
+            entry["sha256"] = "[sha256 not computed]"
+        if "name" not in entry:
+            entry["name"] = fp.name
+        enriched.append(entry)
+    return enriched
 
 
 def generate_delivery_note(
@@ -632,22 +700,7 @@ def generate_delivery_note(
     if not files:
         return fail("files list must not be empty").to_dict()
 
-    # Compute SHA256 for each file if not provided
-    enriched: list[dict[str, Any]] = []
-    for f in files:
-        entry = dict(f)
-        fp = Path(f.get("path", f.get("name", "")))
-        if "sha256" not in entry and fp.exists():
-            try:
-                entry["sha256"] = sha256_file(fp)
-            except OSError:
-                entry["sha256"] = "[error computing sha256]"
-        elif "sha256" not in entry:
-            entry["sha256"] = "[sha256 not computed]"
-        if "name" not in entry:
-            entry["name"] = fp.name
-        enriched.append(entry)
-
+    enriched = _enrich_files(files)
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     file_names = [e["name"] for e in enriched]
 
@@ -678,16 +731,7 @@ def generate_delivery_note(
         "files_count": len(enriched),
     }
 
-    # Attempt PDF generation — skip gracefully if weasyprint absent
-    try:
-        pdf_dest = dest.with_suffix(".pdf")
-        markdown_file_to_pdf(dest, pdf_dest)
-        result_data["pdf_path"] = str(pdf_dest)
-    except ImportError:
-        result_data["pdf_skipped"] = "weasyprint not installed"
-    except Exception as exc:  # noqa: BLE001
-        result_data["pdf_error"] = str(exc)
-
+    result_data.update(_try_pdf_packaging(dest))
     return ok(result_data).to_dict()
 
 
@@ -696,154 +740,52 @@ def generate_delivery_note(
 # ---------------------------------------------------------------------------
 
 
-# MCP wrapper — keep signature in sync with merge_lora_weights
-def _mcp_merge_lora_weights(
-    base_model: str,
-    adapter_path: str,
-    output_path: str,
-    local_python: bool = False,
-) -> dict[str, Any]:
-    return merge_lora_weights(
-        base_model=base_model,
-        adapter_path=adapter_path,
-        output_path=output_path,
-        local_python=local_python,
-    )
+# fmt: off
+def _mcp_merge_lora_weights(base_model: str, adapter_path: str, output_path: str, local_python: bool = False) -> dict[str, Any]:
+    return merge_lora_weights(base_model=base_model, adapter_path=adapter_path, output_path=output_path, local_python=local_python)
 
 
-# MCP wrapper — keep signature in sync with quantize_model
-def _mcp_quantize_model(
-    model_path: str,
-    format: str = "gguf",
-    bits: int = 4,
-    output_path: str | None = None,
-    local_python: bool = False,
-) -> dict[str, Any]:
-    return quantize_model(
-        model_path=model_path,
-        format=format,
-        bits=bits,
-        output_path=output_path,
-        local_python=local_python,
-    )
+def _mcp_quantize_model(model_path: str, format: str = "gguf", bits: int = 4, output_path: str | None = None, local_python: bool = False) -> dict[str, Any]:
+    return quantize_model(model_path=model_path, format=format, bits=bits, output_path=output_path, local_python=local_python)
 
 
-# MCP wrapper — keep signature in sync with build_inference_container
-def _mcp_build_inference_container(
-    model_path: str,
-    engine: str = "vllm",
-    project_id: str | None = None,
-) -> dict[str, Any]:
-    return build_inference_container(
-        model_path=model_path,
-        engine=engine,
-        project_id=project_id,
-    )
+def _mcp_build_inference_container(model_path: str, engine: str = "vllm", project_id: str | None = None) -> dict[str, Any]:
+    return build_inference_container(model_path=model_path, engine=engine, project_id=project_id)
 
 
-# MCP wrapper — keep signature in sync with generate_inference_config
-def _mcp_generate_inference_config(
-    port: int = 8000,
-    context_length: int = 4096,
-    max_concurrent: int = 4,
-    engine: str = "vllm",
-    api_key_env_name: str = "API_KEY",
-    extra_params: dict[str, Any] | None = None,
-    project_id: str | None = None,
-) -> dict[str, Any]:
-    return generate_inference_config(
-        port=port,
-        context_length=context_length,
-        max_concurrent=max_concurrent,
-        engine=engine,
-        api_key_env_name=api_key_env_name,
-        extra_params=extra_params,
-        project_id=project_id,
-    )
+def _mcp_generate_inference_config(port: int = 8000, context_length: int = 4096, max_concurrent: int = 4, engine: str = "vllm", api_key_env_name: str = "API_KEY", extra_params: dict[str, Any] | None = None, project_id: str | None = None) -> dict[str, Any]:
+    return generate_inference_config(port=port, context_length=context_length, max_concurrent=max_concurrent, engine=engine, api_key_env_name=api_key_env_name, extra_params=extra_params, project_id=project_id)
 
 
-# MCP wrapper — keep signature in sync with test_inference_api
-def _mcp_test_inference_api(
-    prompts: list[str],
-    base_url: str | None = None,
-    model: str = "ftos-model",
-    max_tokens: int = 64,
-    api_key_env: str = "API_KEY",
-) -> dict[str, Any]:
-    return test_inference_api(
-        prompts=prompts,
-        base_url=base_url,
-        model=model,
-        max_tokens=max_tokens,
-        api_key_env=api_key_env,
-    )
+def _mcp_test_inference_api(prompts: list[str], base_url: str | None = None, model: str = "ftos-model", max_tokens: int = 64, api_key_env: str = "API_KEY") -> dict[str, Any]:
+    return test_inference_api(prompts=prompts, base_url=base_url, model=model, max_tokens=max_tokens, api_key_env=api_key_env)
 
 
-# MCP wrapper — keep signature in sync with encrypt_deliverable
-def _mcp_encrypt_deliverable(
-    paths: list[str],
-    output_dir: str | None = None,
-) -> dict[str, Any]:
+def _mcp_encrypt_deliverable(paths: list[str], output_dir: str | None = None) -> dict[str, Any]:
     return encrypt_deliverable(paths=paths, output_dir=output_dir)
 
 
-# MCP wrapper — keep signature in sync with upload_deliverable
-def _mcp_upload_deliverable(
-    path: str,
-    destination: str = ".",
-) -> dict[str, Any]:
+def _mcp_upload_deliverable(path: str, destination: str = ".") -> dict[str, Any]:
     return upload_deliverable(path=path, destination=destination)
 
 
-# MCP wrapper — keep signature in sync with generate_delivery_note
-def _mcp_generate_delivery_note(
-    project_id: str,
-    files: list[dict[str, Any]],
-    prestataire_nom: str = "[PRESTATAIRE]",
-    client_nom: str = "[CLIENT]",
-) -> dict[str, Any]:
-    return generate_delivery_note(
-        project_id=project_id,
-        files=files,
-        prestataire_nom=prestataire_nom,
-        client_nom=client_nom,
-    )
+def _mcp_generate_delivery_note(project_id: str, files: list[dict[str, Any]], prestataire_nom: str = "[PRESTATAIRE]", client_nom: str = "[CLIENT]") -> dict[str, Any]:
+    return generate_delivery_note(project_id=project_id, files=files, prestataire_nom=prestataire_nom, client_nom=client_nom)
+# fmt: on
 
 
+# fmt: off
 _MCP_TOOLS = [
-    (
-        _mcp_merge_lora_weights,
-        "Emit the LoRA merge command (base + adapter → merged 16-bit) — dry_run unless FTOS_LOCAL_PYTHON configured.",
-    ),
-    (
-        _mcp_quantize_model,
-        "Emit the quantization command for GGUF/GPTQ/AWQ — dry_run unless FTOS_LOCAL_PYTHON configured.",
-    ),
-    (
-        _mcp_build_inference_container,
-        "Render Dockerfile.infer and emit docker build command — dry_run unless local docker configured.",
-    ),
-    (
-        _mcp_generate_inference_config,
-        "Produce inference server config (port, api key NAME ref, context, limits) — no secrets embedded.",
-    ),
-    (
-        _mcp_test_inference_api,
-        "Send test requests to a running inference container — dry_run curl unless base_url provided.",
-    ),
-    (
-        _mcp_encrypt_deliverable,
-        "AES-256-GCM encrypt deliverable file(s); key returned ONCE in data, never persisted.",
-    ),
-    (
-        _mcp_upload_deliverable,
-        "Upload encrypted deliverable over SFTP — dry_run unless FTOS_SFTP_* configured.",
-    ),
-    (
-        _mcp_generate_delivery_note,
-        "Render delivery note with file list + SHA256 each + decryption procedure.",
-    ),
+    (_mcp_merge_lora_weights,        "Emit the LoRA merge command (base + adapter → merged 16-bit) — dry_run unless FTOS_LOCAL_PYTHON configured."),
+    (_mcp_quantize_model,            "Emit the quantization command for GGUF/GPTQ/AWQ — dry_run unless FTOS_LOCAL_PYTHON configured."),
+    (_mcp_build_inference_container, "Render Dockerfile.infer and emit docker build command — dry_run unless local docker configured."),
+    (_mcp_generate_inference_config, "Produce inference server config (port, api key NAME ref, context, limits) — no secrets embedded."),
+    (_mcp_test_inference_api,        "Send test requests to a running inference container — dry_run curl unless base_url provided."),
+    (_mcp_encrypt_deliverable,       "AES-256-GCM encrypt deliverable file(s); key returned ONCE in data, never persisted."),
+    (_mcp_upload_deliverable,        "Upload encrypted deliverable over SFTP — dry_run unless FTOS_SFTP_* configured."),
+    (_mcp_generate_delivery_note,    "Render delivery note with file list + SHA256 each + decryption procedure."),
 ]
+# fmt: on
 
 
 def register(mcp: object) -> None:  # type: ignore[type-arg]
