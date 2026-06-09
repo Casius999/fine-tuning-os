@@ -116,6 +116,35 @@ class TestAuditCodeNoNetwork:
         result = security.audit_code_no_network(source=source)
         assert result["data"]["verdict"] == "violations"
 
+    # FIX #1: multi-alias import — only asyncio is allowlisted, requests must be flagged
+    def test_multi_alias_allowlist_partial(self) -> None:
+        source = "import asyncio, requests\n"
+        result = security.audit_code_no_network(source=source, allowlist=["asyncio"])
+        assert result["success"] is True
+        assert result["data"]["verdict"] == "violations"
+        details = [f["detail"] for f in result["data"]["findings"]]
+        assert any("requests" in d for d in details)
+        assert not any("asyncio" in d for d in details)
+
+    def test_multi_alias_allowlist_reverse_order(self) -> None:
+        """Order-independence: requests listed first, allowlisted asyncio listed second."""
+        source = "import requests, asyncio\n"
+        result = security.audit_code_no_network(source=source, allowlist=["asyncio"])
+        assert result["data"]["verdict"] == "violations"
+        details = [f["detail"] for f in result["data"]["findings"]]
+        assert any("requests" in d for d in details)
+        assert not any("asyncio" in d for d in details)
+
+    # FIX #7: OSError path after exists() returns True
+    def test_oserror_on_read_returns_fail(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        p = tmp_path / "code.py"
+        p.write_text("import os\n", encoding="utf-8")
+        monkeypatch.setattr(
+            Path, "read_text", lambda *a, **kw: (_ for _ in ()).throw(OSError("permission denied"))
+        )
+        result = security.audit_code_no_network(code_path=str(p))
+        assert result["success"] is False
+
 
 # ---------------------------------------------------------------------------
 # Tool 34: audit_dockerfile_security (C3)
@@ -209,6 +238,24 @@ class TestAuditDockerfileSecurity:
         kinds = [f["kind"] for f in result["data"]["findings"]]
         assert "network_fetch" in kinds
 
+    # FIX #3: USER override — final USER root must still be flagged
+    def test_user_override_to_root_flagged(self) -> None:
+        df = "FROM ubuntu:22.04\nUSER appuser\nUSER root\nRUN cmd\n"
+        result = security.audit_dockerfile_security(dockerfile_text=df)
+        assert result["success"] is True
+        kinds = [f["kind"] for f in result["data"]["findings"]]
+        assert "runs_as_root" in kinds
+
+    # FIX #7: OSError path for dockerfile
+    def test_oserror_on_read_returns_fail(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        p = tmp_path / "Dockerfile"
+        p.write_text("FROM alpine\n", encoding="utf-8")
+        monkeypatch.setattr(
+            Path, "read_text", lambda *a, **kw: (_ for _ in ()).throw(OSError("permission denied"))
+        )
+        result = security.audit_dockerfile_security(dockerfile_path=str(p))
+        assert result["success"] is False
+
 
 # ---------------------------------------------------------------------------
 # Tool 35: scan_data_leakage_risk (C3)
@@ -270,6 +317,16 @@ class TestScanDataLeakageRisk:
         result = security.scan_data_leakage_risk(logs_path=str(log_file))
         assert result["success"] is True
         assert result["data"]["total_masked"] >= 1
+
+    # FIX #7: OSError path for scan_data_leakage_risk
+    def test_oserror_on_read_returns_fail(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        p = tmp_path / "log.txt"
+        p.write_text("some log\n", encoding="utf-8")
+        monkeypatch.setattr(
+            Path, "read_text", lambda *a, **kw: (_ for _ in ()).throw(OSError("permission denied"))
+        )
+        result = security.scan_data_leakage_risk(logs_path=str(p))
+        assert result["success"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -450,3 +507,13 @@ class TestSanitizeLogsForClaude:
         assert "admin@corp.com" not in result["data"]["sanitized"]
         assert "10.0.0.1" not in result["data"]["sanitized"]
         assert result["data"]["masked_count"] >= 2
+
+    # FIX #7: OSError path for sanitize_logs_for_claude
+    def test_oserror_on_read_returns_fail(self, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        p = tmp_path / "log.txt"
+        p.write_text("some log\n", encoding="utf-8")
+        monkeypatch.setattr(
+            Path, "read_text", lambda *a, **kw: (_ for _ in ()).throw(OSError("permission denied"))
+        )
+        result = security.sanitize_logs_for_claude(log_path=str(p))
+        assert result["success"] is False

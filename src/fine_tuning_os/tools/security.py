@@ -64,11 +64,13 @@ class _NetworkVisitor(ast.NodeVisitor):
         self.findings.append({"line": lineno, "kind": kind, "detail": detail})
 
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+        # FIX #1: use `continue` (not `return`) so all aliases in the same
+        # statement are checked independently (e.g. `import asyncio, requests`
+        # with allowlist=["asyncio"] must still flag `requests`).
         for alias in node.names:
             mod = alias.name
             if mod in self._allowlist:
-                self.generic_visit(node)
-                return
+                continue
             root = mod.split(".")[0]
             if mod in _NETWORK_MODULES or root in _NETWORK_MODULES:
                 self._add(node.lineno, "network_import", f"import {mod}")
@@ -182,6 +184,101 @@ def _parse_dockerfile(text: str) -> list[tuple[int, str, str]]:
     return instructions
 
 
+def _check_from_instruction(
+    lineno: int, rest: str, findings: list[dict[str, Any]], has_from: list[bool]
+) -> None:
+    """Check FROM instruction for unpinned base images."""
+    has_from[0] = True
+    image = rest.split()[0] if rest.split() else ""
+    if image.endswith(":latest"):
+        findings.append(
+            {
+                "line": lineno,
+                "kind": "unpinned_image",
+                "detail": f"Base image uses ':latest' tag: {image}",
+                "severity": "high",
+            }
+        )
+    elif ":" not in image and "@" not in image:
+        findings.append(
+            {
+                "line": lineno,
+                "kind": "unpinned_image",
+                "detail": f"Base image has no tag or digest: {image}",
+                "severity": "high",
+            }
+        )
+
+
+def _check_env_arg_instruction(
+    lineno: int, instr: str, rest: str, findings: list[dict[str, Any]]
+) -> None:
+    """Check ENV/ARG instructions for secret-looking names."""
+    for token in rest.split():
+        name = token.split("=")[0]
+        if _SECRET_NAME_RE.search(name):
+            findings.append(
+                {
+                    "line": lineno,
+                    "kind": "secret_in_env",
+                    "detail": f"{instr} uses secret-looking name: {name}",
+                    "severity": "critical",
+                }
+            )
+
+
+def _check_run_instruction(lineno: int, rest: str, findings: list[dict[str, Any]]) -> None:
+    """Check RUN instructions for unsafe network fetches and cert bypasses."""
+    if _NETWORK_FETCH_RE.search(rest):
+        findings.append(
+            {
+                "line": lineno,
+                "kind": "pipe_install",
+                "detail": f"RUN pipes network content to shell: {rest[:80]}",
+                "severity": "critical",
+            }
+        )
+    if _NO_CHECK_CERT_RE.search(rest):
+        findings.append(
+            {
+                "line": lineno,
+                "kind": "no_cert_check",
+                "detail": "RUN uses --no-check-certificate",
+                "severity": "high",
+            }
+        )
+
+
+def _check_dockerfile_instruction(
+    lineno: int,
+    instr: str,
+    rest: str,
+    findings: list[dict[str, Any]],
+    last_user: list[str | None],
+    has_from: list[bool],
+) -> None:
+    """Dispatch a single Dockerfile instruction to the appropriate checker."""
+    if instr == "FROM":
+        _check_from_instruction(lineno, rest, findings, has_from)
+    elif instr == "USER":
+        # FIX #3: track LAST user, not a boolean flag
+        last_user[0] = rest.strip().split(":")[0]
+    elif instr in ("ENV", "ARG"):
+        _check_env_arg_instruction(lineno, instr, rest, findings)
+    elif instr == "ADD":
+        if _ADD_HTTP_RE.match(f"ADD {rest}"):
+            findings.append(
+                {
+                    "line": lineno,
+                    "kind": "network_fetch",
+                    "detail": f"ADD fetches over HTTP/HTTPS: {rest[:80]}",
+                    "severity": "high",
+                }
+            )
+    elif instr == "RUN":
+        _check_run_instruction(lineno, rest, findings)
+
+
 def audit_dockerfile_security(
     dockerfile_text: str | None = None,
     dockerfile_path: str | None = None,
@@ -206,84 +303,15 @@ def audit_dockerfile_security(
     instructions = _parse_dockerfile(dockerfile_text)
     findings: list[dict[str, Any]] = []
 
-    has_non_root_user = False
-    has_from = False
+    # FIX #3: use mutable containers so the helper can update them
+    last_user: list[str | None] = [None]
+    has_from: list[bool] = [False]
 
     for lineno, instr, rest in instructions:
-        if instr == "FROM":
-            has_from = True
-            # Check for :latest or no tag
-            image = rest.split()[0] if rest.split() else ""
-            if image.endswith(":latest"):
-                findings.append(
-                    {
-                        "line": lineno,
-                        "kind": "unpinned_image",
-                        "detail": f"Base image uses ':latest' tag: {image}",
-                        "severity": "high",
-                    }
-                )
-            elif ":" not in image and "@" not in image:
-                findings.append(
-                    {
-                        "line": lineno,
-                        "kind": "unpinned_image",
-                        "detail": f"Base image has no tag or digest: {image}",
-                        "severity": "high",
-                    }
-                )
+        _check_dockerfile_instruction(lineno, instr, rest, findings, last_user, has_from)
 
-        elif instr == "USER":
-            user = rest.strip().split(":")[0]
-            if user not in ("0", "root"):
-                has_non_root_user = True
-
-        elif instr in ("ENV", "ARG"):
-            # Check for secret-looking variable names
-            for token in rest.split():
-                name = token.split("=")[0]
-                if _SECRET_NAME_RE.search(name):
-                    findings.append(
-                        {
-                            "line": lineno,
-                            "kind": "secret_in_env",
-                            "detail": f"{instr} uses secret-looking name: {name}",
-                            "severity": "critical",
-                        }
-                    )
-
-        elif instr == "ADD":
-            if _ADD_HTTP_RE.match(f"ADD {rest}"):
-                findings.append(
-                    {
-                        "line": lineno,
-                        "kind": "network_fetch",
-                        "detail": f"ADD fetches over HTTP/HTTPS: {rest[:80]}",
-                        "severity": "high",
-                    }
-                )
-
-        elif instr == "RUN":
-            if _NETWORK_FETCH_RE.search(rest):
-                findings.append(
-                    {
-                        "line": lineno,
-                        "kind": "pipe_install",
-                        "detail": f"RUN pipes network content to shell: {rest[:80]}",
-                        "severity": "critical",
-                    }
-                )
-            if _NO_CHECK_CERT_RE.search(rest):
-                findings.append(
-                    {
-                        "line": lineno,
-                        "kind": "no_cert_check",
-                        "detail": "RUN uses --no-check-certificate",
-                        "severity": "high",
-                    }
-                )
-
-    if has_from and not has_non_root_user:
+    # FIX #3: flag if the LAST user instruction ends up as root (or there is none)
+    if has_from[0] and last_user[0] in (None, "0", "root"):
         findings.append(
             {
                 "line": 0,
@@ -462,6 +490,65 @@ def _get_store(store: Store | None) -> Store:
     return store if store is not None else Store(root=workspace_root())
 
 
+def _append_code_audit_section(sections: list[str], code_audit: dict[str, Any]) -> None:
+    """Append the code audit section to sections list."""
+    if code_audit:
+        verdict = code_audit.get("verdict", "N/A")
+        num = code_audit.get("num_findings", 0)
+        sections.append(
+            f"## Code Audit (no-network)\n\n- Verdict: **{verdict}**\n- Findings: {num}\n"
+        )
+        for f_item in code_audit.get("findings", []):
+            sections.append(
+                f"  - Line {f_item.get('line')}: `{f_item.get('kind')}` — {f_item.get('detail')}\n"
+            )
+    else:
+        sections.append("## Code Audit (no-network)\n\n_Not run._\n")
+
+
+def _append_dockerfile_section(sections: list[str], df_audit: dict[str, Any]) -> None:
+    """Append the Dockerfile audit section to sections list."""
+    if df_audit:
+        verdict = df_audit.get("verdict", "N/A")
+        num = df_audit.get("num_findings", 0)
+        sections.append(f"## Dockerfile Security\n\n- Verdict: **{verdict}**\n- Findings: {num}\n")
+        for f_item in df_audit.get("findings", []):
+            sev = f_item.get("severity", "info")
+            sections.append(
+                f"  - [{sev.upper()}] Line {f_item.get('line')}: `{f_item.get('kind')}` — {f_item.get('detail')}\n"
+            )
+    else:
+        sections.append("## Dockerfile Security\n\n_Not run._\n")
+
+
+def _append_leakage_section(sections: list[str], leakage: dict[str, Any]) -> None:
+    """Append the data leakage scan section to sections list."""
+    if leakage:
+        risk = leakage.get("risk", "N/A")
+        total = leakage.get("total_masked", 0)
+        sections.append(
+            f"## Data Leakage Scan\n\n- Risk level: **{risk}**\n- Items masked: {total}\n"
+        )
+        for cat, cnt in leakage.get("categories", {}).items():
+            sections.append(f"  - {cat}: {cnt}\n")
+    else:
+        sections.append("## Data Leakage Scan\n\n_Not run._\n")
+
+
+def _append_license_section(sections: list[str], license_info: dict[str, Any]) -> None:
+    """Append the model license section to sections list."""
+    if license_info:
+        sections.append(
+            f"## Model License\n\n"
+            f"- repo_id: `{license_info.get('repo_id')}`\n"
+            f"- License: {license_info.get('license')}\n"
+            f"- Commercial OK: {license_info.get('commercial_ok')}\n"
+            f"- Notes: {license_info.get('notes')}\n"
+        )
+    else:
+        sections.append("## Model License\n\n_Not run._\n")
+
+
 def generate_security_report(
     project_id: str,
     findings: dict[str, Any] | None = None,
@@ -485,61 +572,10 @@ def generate_security_report(
     findings = findings or {}
 
     sections = [f"# Security Report — Project `{project_id}`\n"]
-
-    # Code audit
-    code_audit = findings.get("code_audit", {})
-    if code_audit:
-        verdict = code_audit.get("verdict", "N/A")
-        num = code_audit.get("num_findings", 0)
-        sections.append(
-            f"## Code Audit (no-network)\n\n- Verdict: **{verdict}**\n- Findings: {num}\n"
-        )
-        for f_item in code_audit.get("findings", []):
-            sections.append(
-                f"  - Line {f_item.get('line')}: `{f_item.get('kind')}` — {f_item.get('detail')}\n"
-            )
-    else:
-        sections.append("## Code Audit (no-network)\n\n_Not run._\n")
-
-    # Dockerfile audit
-    df_audit = findings.get("dockerfile_audit", {})
-    if df_audit:
-        verdict = df_audit.get("verdict", "N/A")
-        num = df_audit.get("num_findings", 0)
-        sections.append(f"## Dockerfile Security\n\n- Verdict: **{verdict}**\n- Findings: {num}\n")
-        for f_item in df_audit.get("findings", []):
-            sev = f_item.get("severity", "info")
-            sections.append(
-                f"  - [{sev.upper()}] Line {f_item.get('line')}: `{f_item.get('kind')}` — {f_item.get('detail')}\n"
-            )
-    else:
-        sections.append("## Dockerfile Security\n\n_Not run._\n")
-
-    # Leakage scan
-    leakage = findings.get("leakage_scan", {})
-    if leakage:
-        risk = leakage.get("risk", "N/A")
-        total = leakage.get("total_masked", 0)
-        sections.append(
-            f"## Data Leakage Scan\n\n- Risk level: **{risk}**\n- Items masked: {total}\n"
-        )
-        for cat, cnt in leakage.get("categories", {}).items():
-            sections.append(f"  - {cat}: {cnt}\n")
-    else:
-        sections.append("## Data Leakage Scan\n\n_Not run._\n")
-
-    # License check
-    license_info = findings.get("license", {})
-    if license_info:
-        sections.append(
-            f"## Model License\n\n"
-            f"- repo_id: `{license_info.get('repo_id')}`\n"
-            f"- License: {license_info.get('license')}\n"
-            f"- Commercial OK: {license_info.get('commercial_ok')}\n"
-            f"- Notes: {license_info.get('notes')}\n"
-        )
-    else:
-        sections.append("## Model License\n\n_Not run._\n")
+    _append_code_audit_section(sections, findings.get("code_audit", {}))
+    _append_dockerfile_section(sections, findings.get("dockerfile_audit", {}))
+    _append_leakage_section(sections, findings.get("leakage_scan", {}))
+    _append_license_section(sections, findings.get("license", {}))
 
     md_content = "\n".join(sections)
 
@@ -552,7 +588,12 @@ def generate_security_report(
     except OSError as exc:
         return fail(f"failed to write report: {exc}").to_dict()
 
-    sha = sha256_file(md_path)
+    # FIX #5: guard sha256_file against OSError
+    try:
+        sha = sha256_file(md_path)
+    except OSError as exc:
+        return fail(f"failed to hash report: {exc}").to_dict()
+
     result: dict[str, Any] = {"md_path": str(md_path), "sha256": sha}
 
     # Optional PDF — skip gracefully if WeasyPrint absent
@@ -563,7 +604,7 @@ def generate_security_report(
     except ImportError:
         result["pdf_path"] = None
         result["pdf_note"] = "WeasyPrint not installed — PDF skipped"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001  # broad catch for optional-PDF degradation
         result["pdf_path"] = None
         result["pdf_note"] = f"PDF generation failed: {exc}"
 
@@ -575,7 +616,6 @@ def _mcp_generate_security_report(
     project_id: str,
     findings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    # MCP wrapper — keep signature in sync with generate_security_report
     return generate_security_report(project_id=project_id, findings=findings)
 
 

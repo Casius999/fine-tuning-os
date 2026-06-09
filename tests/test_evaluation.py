@@ -294,6 +294,32 @@ class TestComputeMetrics:
         result = evaluation.compute_metrics(preds=["a"], refs=["a"], task="summarization")
         assert result["success"] is False
 
+    # FIX #2: OverflowError in _compute_perplexity must not propagate
+    def test_lm_overflow_nll_returns_fail_not_exception(self) -> None:
+        """nll=800.0 causes math.exp overflow — must return success=False, not raise."""
+        result = evaluation.compute_metrics(preds=["a"], refs=["a"], task="lm", nll=800.0)
+        # OverflowError → _compute_perplexity returns None → lm path returns fail(...)
+        assert result["success"] is False
+        assert "nll" in result["error"].lower() or "logprobs" in result["error"].lower()
+
+    def test_generation_overflow_nll_no_exception(self) -> None:
+        """For generation task, overflow in perplexity should not raise."""
+        result = evaluation.compute_metrics(
+            preds=["hello world"], refs=["hello world"], task="generation", nll=800.0
+        )
+        # Should succeed — perplexity simply absent from metrics
+        assert result["success"] is True
+        assert "perplexity" not in result["data"]["metrics"]
+
+    # FIX #4: BLEU note for short candidate
+    def test_bleu_note_on_short_candidate(self) -> None:
+        """A 1-token identical pair gives BLEU=0 and a note."""
+        result = evaluation.compute_metrics(preds=["a"], refs=["a"], task="generation")
+        assert result["success"] is True
+        assert result["data"]["metrics"]["bleu"] == 0.0
+        assert "notes" in result["data"]
+        assert any("shorter than 4 tokens" in n for n in result["data"]["notes"])
+
 
 # ---------------------------------------------------------------------------
 # Tool 30: generate_predictions_sample (C1)

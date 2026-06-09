@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 import paramiko
@@ -171,14 +172,22 @@ def _compute_perplexity(
     loss: float | None,
     logprobs: list[float] | None,
 ) -> float | None:
-    """Compute perplexity = exp(mean negative log-likelihood)."""
-    if nll is not None:
-        return math.exp(nll)
-    if loss is not None:
-        return math.exp(loss)
-    if logprobs:
-        mean_nll = -sum(logprobs) / len(logprobs)
-        return math.exp(mean_nll)
+    """Compute perplexity = exp(mean negative log-likelihood).
+
+    Returns None when no input is provided.
+    Returns None (not raises) on OverflowError so callers never receive an
+    exception — the lm task path converts None to fail(...).
+    """
+    try:
+        if nll is not None:
+            return math.exp(nll)
+        if loss is not None:
+            return math.exp(loss)
+        if logprobs:
+            mean_nll = -sum(logprobs) / len(logprobs)
+            return math.exp(mean_nll)
+    except OverflowError:
+        return None
     return None
 
 
@@ -273,7 +282,9 @@ def _rouge_l(pred: str, ref: str) -> float:
     return round(2 * precision * recall / (precision + recall), 6)
 
 
-def _mean_rouge(fn: Any, preds: list[str], refs: list[str], **kw: Any) -> float:
+def _mean_rouge(
+    fn: Callable[[str, str], float], preds: list[str], refs: list[str], **kw: Any
+) -> float:
     scores = [fn(p, r, **kw) for p, r in zip(preds, refs)]
     return round(sum(scores) / len(scores), 6) if scores else 0.0
 
@@ -293,6 +304,36 @@ def _accuracy_macro_f1(preds: list[str], refs: list[str]) -> tuple[float, float]
         f1s.append((2 * tp / denom) if denom > 0 else 0.0)
     macro_f1 = sum(f1s) / len(f1s) if f1s else 0.0
     return round(accuracy, 6), round(macro_f1, 6)
+
+
+def _compute_generation_metrics(
+    preds: list[str],
+    refs: list[str],
+    nll: float | None,
+    loss: float | None,
+    logprobs: list[float] | None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Compute BLEU/ROUGE/perplexity for generation task. Returns (metrics, notes)."""
+    metrics: dict[str, Any] = {}
+    notes: list[str] = []
+
+    bleu = _corpus_bleu(preds, refs)
+    metrics["bleu"] = bleu
+    # Surface a note when BLEU is structurally 0 due to short candidate
+    if bleu == 0.0:
+        min_pred_len = min(len(p.split()) for p in preds)
+        if min_pred_len < 4:
+            notes.append(
+                "BLEU is 0 because candidate shorter than 4 tokens; "
+                "consider shorter n or expect 0"
+            )
+    metrics["rouge1"] = _mean_rouge(_rouge_n, preds, refs, n=1)
+    metrics["rouge2"] = _mean_rouge(_rouge_n, preds, refs, n=2)
+    metrics["rougeL"] = _mean_rouge(_rouge_l, preds, refs)
+    ppl = _compute_perplexity(nll, loss, logprobs)
+    if ppl is not None:
+        metrics["perplexity"] = round(ppl, 4)
+    return metrics, notes
 
 
 def compute_metrics(
@@ -317,28 +358,24 @@ def compute_metrics(
         return fail(f"preds and refs length mismatch: {len(preds)} vs {len(refs)}").to_dict()
 
     metrics: dict[str, Any] = {}
+    data_notes: list[str] = []
 
     if task == "generation":
-        metrics["bleu"] = _corpus_bleu(preds, refs)
-        metrics["rouge1"] = _mean_rouge(_rouge_n, preds, refs, n=1)
-        metrics["rouge2"] = _mean_rouge(_rouge_n, preds, refs, n=2)
-        metrics["rougeL"] = _mean_rouge(_rouge_l, preds, refs)
-        ppl = _compute_perplexity(nll, loss, logprobs)
-        if ppl is not None:
-            metrics["perplexity"] = round(ppl, 4)
-
+        metrics, data_notes = _compute_generation_metrics(preds, refs, nll, loss, logprobs)
     elif task == "classification":
         acc, mf1 = _accuracy_macro_f1(preds, refs)
         metrics["accuracy"] = acc
         metrics["macro_f1"] = mf1
-
     elif task == "lm":
         ppl = _compute_perplexity(nll, loss, logprobs)
         if ppl is None:
             return fail("task='lm' requires nll, loss, or logprobs").to_dict()
         metrics["perplexity"] = round(ppl, 4)
 
-    return ok({"task": task, "metrics": metrics}).to_dict()
+    result_data: dict[str, Any] = {"task": task, "metrics": metrics}
+    if data_notes:
+        result_data["notes"] = data_notes
+    return ok(result_data).to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -417,21 +454,14 @@ _IMPROVEMENT_DIRECTION: dict[str, str] = {
 }
 
 
-def compare_to_baseline(
+def _build_comparison_rows(
     metrics_ft: dict[str, float],
     metrics_base: dict[str, float],
-) -> dict[str, Any]:
-    """Compute per-metric deltas and a Markdown comparison table.
-
-    Direction: perplexity/loss → lower is better; all others → higher is better.
-    """
-    if not metrics_ft or not metrics_base:
-        return fail("metrics_ft and metrics_base must not be empty").to_dict()
-
+) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    """Build per-metric delta rows and deltas dict from two metric dicts."""
     all_keys = sorted(set(metrics_ft) | set(metrics_base))
     rows: list[dict[str, Any]] = []
     deltas: dict[str, float] = {}
-
     for key in all_keys:
         ft_val = metrics_ft.get(key)
         base_val = metrics_base.get(key)
@@ -460,8 +490,11 @@ def compare_to_baseline(
                 "improved": improved,
             }
         )
+    return rows, deltas
 
-    # Markdown table
+
+def _render_comparison_table(rows: list[dict[str, Any]]) -> str:
+    """Render a list of comparison rows as a Markdown table string."""
     lines = [
         "| Metric | Baseline | Fine-tuned | Delta | Direction | Improved |",
         "| --- | --- | --- | --- | --- | --- |",
@@ -476,8 +509,21 @@ def compare_to_baseline(
             f"| {r.get('direction', 'N/A')} "
             f"| {improved_str} |"
         )
-    table_md = "\n".join(lines)
+    return "\n".join(lines)
 
+
+def compare_to_baseline(
+    metrics_ft: dict[str, float],
+    metrics_base: dict[str, float],
+) -> dict[str, Any]:
+    """Compute per-metric deltas and a Markdown comparison table.
+
+    Direction: perplexity/loss → lower is better; all others → higher is better.
+    """
+    if not metrics_ft or not metrics_base:
+        return fail("metrics_ft and metrics_base must not be empty").to_dict()
+    rows, deltas = _build_comparison_rows(metrics_ft, metrics_base)
+    table_md = _render_comparison_table(rows)
     return ok({"deltas": deltas, "rows": rows, "table_md": table_md}).to_dict()
 
 
