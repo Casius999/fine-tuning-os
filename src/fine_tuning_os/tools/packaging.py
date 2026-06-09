@@ -266,14 +266,17 @@ def _write_dockerfile(
     except Exception as exc:  # noqa: BLE001
         return fail(f"template error: {exc}").to_dict()
 
+    if not project_id:
+        return fail(
+            "project_id is required for build_inference_container; "
+            "writing to a relative path is not allowed (filesystem confinement)"
+        ).to_dict()
+
     s = _get_store(store)
-    if project_id:
-        try:
-            dest_dir = s.project_dir(project_id) / "docker"
-        except ValueError as exc:
-            return fail(str(exc)).to_dict()
-    else:
-        dest_dir = Path("docker")
+    try:
+        dest_dir = s.project_dir(project_id) / "docker"
+    except ValueError as exc:
+        return fail(str(exc)).to_dict()
 
     dockerfile_path = dest_dir / "Dockerfile.infer"
 
