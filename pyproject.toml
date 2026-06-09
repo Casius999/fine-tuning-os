@@ -37,6 +37,9 @@ testpaths = ["tests"]
 source = ["src/fine_tuning_os"]
 omit = ["src/fine_tuning_os/templates/*"]
 
+[tool.coverage.report]
+fail_under = 95
+
 [tool.ruff]
 line-length = 100
 
