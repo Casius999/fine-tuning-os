@@ -102,31 +102,52 @@ class TestQuantizeModel:
 # Tool 41: build_inference_container (C2 — docker)
 # ---------------------------------------------------------------------------
 class TestBuildInferenceContainer:
-    def test_dry_run_no_docker_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_dry_run_no_docker_env(
+        self, store: Any, project_id: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("FTOS_LOCAL_PYTHON", raising=False)
         result = packaging.build_inference_container(
             model_path="/models/merged",
             engine="vllm",
+            project_id=project_id,
+            store=store,
         )
         assert result["success"] is True
         assert result["meta"]["dry_run"] is True
         assert "docker build" in result["data"]["command"]
         assert "dockerfile_content" in result["data"]
 
-    def test_dockerfile_contains_engine_vllm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_dockerfile_contains_engine_vllm(
+        self, store: Any, project_id: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("FTOS_LOCAL_PYTHON", raising=False)
-        result = packaging.build_inference_container(model_path="/models/m", engine="vllm")
+        result = packaging.build_inference_container(
+            model_path="/models/m", engine="vllm", project_id=project_id, store=store
+        )
         assert "vllm" in result["data"]["dockerfile_content"].lower()
 
-    def test_dockerfile_contains_engine_sglang(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_dockerfile_contains_engine_sglang(
+        self, store: Any, project_id: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("FTOS_LOCAL_PYTHON", raising=False)
-        result = packaging.build_inference_container(model_path="/models/m", engine="sglang")
+        result = packaging.build_inference_container(
+            model_path="/models/m", engine="sglang", project_id=project_id, store=store
+        )
         assert "sglang" in result["data"]["dockerfile_content"].lower()
 
     def test_invalid_engine_fails(self) -> None:
         result = packaging.build_inference_container(model_path="/models/m", engine="triton")
         assert result["success"] is False
         assert "triton" in result["error"]
+
+    def test_missing_project_id_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No project_id → fail (never write to CWD)."""
+        monkeypatch.delenv("FTOS_LOCAL_PYTHON", raising=False)
+        result = packaging.build_inference_container(
+            model_path="/models/m", engine="vllm", project_id=None
+        )
+        assert result["success"] is False
+        assert "project_id" in result["error"].lower()
 
     def test_dockerfile_written_to_disk(
         self, store: Any, project_id: str, monkeypatch: pytest.MonkeyPatch
@@ -143,11 +164,66 @@ class TestBuildInferenceContainer:
         assert dockerfile.exists()
         assert "FROM" in dockerfile.read_text()
 
-    def test_dry_run_no_subprocess(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_dry_run_no_subprocess(
+        self, store: Any, project_id: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("FTOS_LOCAL_PYTHON", raising=False)
         with patch("subprocess.run", side_effect=AssertionError("no subprocess")):
-            result = packaging.build_inference_container(model_path="/m", engine="vllm")
+            result = packaging.build_inference_container(
+                model_path="/m", engine="vllm", project_id=project_id, store=store
+            )
         assert result["success"] is True
+
+    def test_no_project_id_fails_not_writes_to_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """TDD / Task A regression: calling without project_id must fail (not write to cwd).
+
+        The old code fell back to Path("docker") relative to CWD, creating stray files
+        at the repo root. After the fix, omitting project_id must return an error, never
+        silently write outside the workspace.
+        """
+        monkeypatch.delenv("FTOS_LOCAL_PYTHON", raising=False)
+        # Capture CWD so we can assert no docker/ dir was created there
+        cwd = Path.cwd()
+        stray_dir = cwd / "docker"
+
+        result = packaging.build_inference_container(
+            model_path="/models/m",
+            engine="vllm",
+            project_id=None,
+            store=None,
+        )
+        # Must fail with an error — no longer silently writes to CWD
+        assert result["success"] is False, (
+            f"Expected failure when project_id is None, got success=True. "
+            f"data={result.get('data')}"
+        )
+        # No stray docker/ directory should exist at CWD
+        assert not stray_dir.exists(), f"Stray docker/ directory was created at {stray_dir}"
+
+    def test_dockerfile_written_inside_workspace_only(
+        self, store: Any, project_id: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dockerfile must land inside store.project_dir, never outside workspace."""
+        monkeypatch.delenv("FTOS_LOCAL_PYTHON", raising=False)
+        result = packaging.build_inference_container(
+            model_path="/models/m",
+            engine="vllm",
+            project_id=project_id,
+            store=store,
+        )
+        assert result["success"] is True
+        dockerfile = Path(result["data"]["dockerfile_path"])
+        # Must be under store.root
+        assert (
+            store.root in dockerfile.parents
+        ), f"Dockerfile {dockerfile} is not under workspace {store.root}"
+        # Must NOT be in cwd or any ancestor of store.root
+        cwd = Path.cwd()
+        assert not dockerfile.is_relative_to(cwd) or dockerfile.is_relative_to(
+            store.root
+        ), f"Dockerfile {dockerfile} would be inside CWD but outside workspace"
 
 
 # ---------------------------------------------------------------------------
@@ -495,9 +571,14 @@ class TestPackagingMcpWrappers:
         result = packaging._mcp_quantize_model(model_path="/m", format="gguf", bits=4)
         assert result["success"] is True
 
-    def test_mcp_build_container_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_mcp_build_container_delegates(
+        self, store: Any, project_id: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("FTOS_LOCAL_PYTHON", raising=False)
-        result = packaging._mcp_build_inference_container(model_path="/m", engine="vllm")
+        monkeypatch.setenv("FTOS_WORKSPACE", str(store.root))
+        result = packaging._mcp_build_inference_container(
+            model_path="/m", engine="vllm", project_id=project_id
+        )
         assert result["success"] is True
 
     def test_mcp_inference_config_delegates(self) -> None:
@@ -621,7 +702,7 @@ class TestLiveConfiguredBranches:
                     )
         assert result["success"] is False
 
-    def test_build_container_live_docker(self) -> None:
+    def test_build_container_live_docker(self, store: Any, project_id: str) -> None:
         mock_run = MagicMock(
             return_value=MagicMock(stdout="Successfully built", stderr="", returncode=0)
         )
@@ -632,10 +713,12 @@ class TestLiveConfiguredBranches:
                     result = packaging.build_inference_container(
                         model_path="/models/m",
                         engine="vllm",
+                        project_id=project_id,
+                        store=store,
                     )
         assert result["success"] is True
 
-    def test_build_container_live_docker_timeout(self) -> None:
+    def test_build_container_live_docker_timeout(self, store: Any, project_id: str) -> None:
         import subprocess  # noqa: PLC0415
 
         with patch("fine_tuning_os.tools.packaging.shutil") as mock_shutil:
@@ -647,6 +730,8 @@ class TestLiveConfiguredBranches:
                     result = packaging.build_inference_container(
                         model_path="/models/m",
                         engine="vllm",
+                        project_id=project_id,
+                        store=store,
                     )
         assert result["success"] is False
 
