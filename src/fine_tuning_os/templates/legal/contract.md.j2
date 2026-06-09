@@ -1,0 +1,155 @@
+# Contrat de Prestation de Services — Fine-Tuning de Modèle de Langage
+## Projet : {{ project_id }}
+
+> **AVERTISSEMENT LÉGAL** : Ce document constitue une base sérieuse à adapter
+> à votre situation. Il ne remplace pas une relecture par un conseil juridique
+> qualifié. L'opérateur décline toute responsabilité en cas d'utilisation sans
+> adaptation par un professionnel du droit.
+
+---
+
+**Entre les soussignés :**
+
+**Le Prestataire** : {{ prestataire_nom | default("[NOM DU PRESTATAIRE]") }},
+{{ prestataire_adresse | default("[ADRESSE]") }},
+SIRET {{ prestataire_siret | default("[SIRET]") }}
+
+**Le Client** : {{ client_nom | default("[NOM DU CLIENT]") }},
+{{ client_adresse | default("[ADRESSE]") }},
+SIRET {{ client_siret | default("[SIRET]") }}
+
+Ci-après dénommés ensemble « les Parties ».
+
+---
+
+## Article 1 — Objet du contrat
+
+*(Code civil, art. 1101 et s. — Formation du contrat)*
+
+Le présent contrat est conclu conformément aux dispositions des articles 1101
+et suivants du Code civil relatifs à la formation, aux conditions de validité
+et aux effets des contrats. Il a pour objet la réalisation d'une prestation de
+fine-tuning (ajustement fin) d'un modèle de langage pré-entraîné, selon les
+spécifications définies en Annexe technique.
+
+**Livrable principal** : {{ livrable | default("Adaptateur LoRA entraîné + rapport de performances") }}
+
+---
+
+## Article 2 — Négociation et bonne foi
+
+*(Code civil, art. 1112 et s. — Négociation, bonne foi précontractuelle)*
+
+Les Parties déclarent avoir négocié le présent contrat de bonne foi,
+conformément aux articles 1112 et suivants du Code civil. Toute information
+confidentielle échangée durant les négociations demeure soumise à une
+obligation de discrétion.
+
+---
+
+## Article 3 — Montant et modalités de paiement
+
+**Montant total TTC** : {{ montant | default("[MONTANT] €") }}
+
+Modalités : {{ modalites_paiement | default("50 % à la commande, 50 % à la livraison") }}
+
+---
+
+## Article 4 — Propriété intellectuelle
+
+*(Code de la propriété intellectuelle — titularité, cession)*
+
+4.1 **Données d'entraînement** : Les données fournies par le Client
+restent la propriété exclusive du Client. Le Prestataire s'interdit
+expressément toute réutilisation à des fins propres ou pour le compte de tiers.
+
+4.2 **Adaptateur / modèle entraîné** : À complet paiement du prix, le
+Prestataire cède au Client l'intégralité des droits patrimoniaux sur
+l'adaptateur produit (droit de reproduction, représentation, adaptation,
+distribution), pour toute exploitation présente et future, dans le monde
+entier, conformément aux dispositions du Code de la propriété intellectuelle.
+
+4.3 **Modèle de base** : Le modèle de base tiers reste soumis à sa licence
+d'origine. Le Prestataire s'assure que ladite licence est compatible avec
+l'usage envisagé par le Client.
+
+---
+
+## Article 5 — Traitement des données personnelles
+
+*(RGPD, art. 28 — Contrat de sous-traitance / DPA)*
+
+Si le dataset fourni par le Client contient des données à caractère personnel
+au sens du RGPD, le présent article vaut contrat de sous-traitance (DPA) au
+sens de l'article 28 du Règlement (UE) 2016/679 :
+
+- Le Prestataire agit en qualité de **sous-traitant** ; le Client est
+  **responsable du traitement**.
+- Les données personnelles ne sont traitées que dans le cadre de la prestation
+  définie à l'article 1.
+- Le Prestataire met en œuvre les mesures techniques et organisationnelles
+  appropriées (chiffrement AES-256-GCM, accès restreint, suppression sécurisée
+  après livraison).
+- Le Prestataire n'engage aucun sous-traitant ultérieur sans accord écrit préalable.
+
+---
+
+## Article 6 — Responsabilité contractuelle et clause limitative
+
+*(Code civil, art. 1231 et s. — Responsabilité contractuelle, mise en demeure,
+dommages-intérêts)*
+
+6.1 En cas d'inexécution ou de mauvaise exécution des obligations du Prestataire,
+le Client devra adresser une mise en demeure par LRAR conformément à l'article 1231
+du Code civil. Le Prestataire disposera de 15 jours ouvrés pour remédier au
+manquement.
+
+6.2 **Clause limitative de responsabilité** : Sauf faute lourde ou dolosive,
+la responsabilité totale du Prestataire au titre du présent contrat est
+plafonnée au montant TTC versé par le Client au cours des 12 derniers mois.
+Cette clause s'applique à tous types de préjudices, directs ou indirects.
+
+6.3 Le Prestataire ne pourra être tenu responsable des performances du modèle
+fine-tuné en production, lesquelles dépendent de facteurs hors de son contrôle
+(données, infrastructure, paramétrage client).
+
+---
+
+## Article 7 — Réversibilité et livrables
+
+À la fin de la prestation, le Prestataire :
+- Remet l'intégralité des livrables (adaptateur, configs, rapports) chiffrés
+  conformément au bon de livraison.
+- Certifie la destruction irréversible des données client en sa possession
+  (certificat de destruction fourni séparément).
+- Fournit la documentation nécessaire à la reprise de la prestation par le Client
+  ou un tiers.
+
+---
+
+## Article 8 — Clauses spécifiques
+
+{{ clauses | default("*(à compléter selon les besoins spécifiques du projet)*") }}
+
+---
+
+## Article 9 — Loi applicable et juridiction
+
+Le présent contrat est régi par le droit français. En cas de litige,
+les Parties s'engagent à rechercher une solution amiable. À défaut,
+le tribunal compétent sera celui du siège social du Prestataire.
+
+---
+
+Fait en deux exemplaires originaux, le {{ date | default("[DATE]") }}.
+
+**Le Prestataire**                    **Le Client**
+
+___________________________           ___________________________
+{{ prestataire_nom | default("[NOM]") }}        {{ client_nom | default("[NOM]") }}
+
+---
+
+*Bases légales : Code civil art. 1101 s. (formation), 1112 s. (bonne foi),
+1231 s. (responsabilité contractuelle) ; Code de la propriété intellectuelle
+(cession de droits) ; RGPD art. 28 (DPA sous-traitant).*

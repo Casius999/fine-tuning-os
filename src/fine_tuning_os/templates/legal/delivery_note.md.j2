@@ -1,0 +1,82 @@
+# Bon de Livraison — {{ project_id }}
+
+> Généré par Fine-Tuning OS. À conserver pour traçabilité.
+
+---
+
+## Identification
+
+- **Projet** : {{ project_id }}
+- **Date de livraison** : {{ delivery_date | default("[DATE]") }}
+- **Prestataire** : {{ prestataire_nom | default("[NOM DU PRESTATAIRE]") }}
+- **Client** : {{ client_nom | default("[NOM DU CLIENT]") }}
+
+---
+
+## Liste des fichiers livrés
+
+| Fichier | Taille | SHA-256 |
+|---------|--------|---------|
+{% for f in files %}
+| `{{ f.name }}` | {{ f.size | default("—") }} | `{{ f.sha256 }}` |
+{% endfor %}
+
+---
+
+## Intégrité
+
+Chaque fichier est identifié par son empreinte SHA-256. Le Client doit
+vérifier l'intégrité de chaque fichier à réception :
+
+```bash
+# Vérification sous Linux/macOS
+sha256sum -c <<EOF
+{% for f in files %}
+{{ f.sha256 }}  {{ f.name }}
+{% endfor %}
+EOF
+```
+
+---
+
+## Procédure de déchiffrement (AES-256-GCM)
+
+Les fichiers livrés sont chiffrés en AES-256-GCM.
+Format : `nonce (12 octets) || ciphertext+tag`.
+
+La clé de déchiffrement vous a été transmise séparément via canal sécurisé.
+**Ne stockez jamais la clé et les fichiers chiffrés au même endroit.**
+
+```python
+# Déchiffrement avec Python + cryptography
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import binascii, pathlib
+
+KEY_HEX = "VOTRE_CLE_HEX_32_OCTETS"
+key = binascii.unhexlify(KEY_HEX)
+
+for filename in {{ file_names | default(["fichier.enc"]) }}:
+    blob = pathlib.Path(filename).read_bytes()
+    nonce, ciphertext = blob[:12], blob[12:]
+    plaintext = AESGCM(key).decrypt(nonce, ciphertext, None)
+    pathlib.Path(filename.replace(".enc", "")).write_bytes(plaintext)
+    print(f"Déchiffré : {filename}")
+```
+
+---
+
+## Déclaration d'intégrité
+
+Le Prestataire certifie que les fichiers listés ci-dessus constituent
+l'intégralité des livrables convenus dans le contrat de prestation pour
+le projet **{{ project_id }}** et que leurs empreintes SHA-256 sont exactes
+au moment de la génération du présent bon.
+
+---
+
+Fait le {{ delivery_date | default("[DATE]") }}.
+
+**Prestataire** : {{ prestataire_nom | default("[NOM]") }}
+
+___________________________
+*(Signature)*

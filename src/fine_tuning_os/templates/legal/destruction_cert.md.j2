@@ -1,0 +1,98 @@
+# Certificat de Destruction Irréversible des Données
+## Projet : {{ project_id }}
+
+> **AVERTISSEMENT LÉGAL** : Ce document constitue une base sérieuse à adapter.
+> Il ne remplace pas une relecture par un conseil juridique qualifié.
+
+---
+
+## Identification
+
+- **Projet** : {{ project_id }}
+- **Client** : {{ client_nom | default("[NOM DU CLIENT]") }}
+- **Prestataire** : {{ prestataire_nom | default("[NOM DU PRESTATAIRE]") }}
+- **Date de destruction** : {{ date }}
+- **Signataire** : {{ signataire | default("[NOM DU SIGNATAIRE]") }}
+
+---
+
+## Attestation
+
+Je soussigné(e) **{{ signataire | default("[NOM DU SIGNATAIRE]") }}**, agissant
+en qualité de responsable technique du prestataire, atteste par le présent
+certificat que l'ensemble des données à caractère personnel et confidentielles
+relatives au projet **{{ project_id }}** ont été définitivement et
+irréversiblement détruites à la date du **{{ date }}**.
+
+---
+
+## Données détruites
+
+{% if description_donnees %}{{ description_donnees }}{% else %}Données d'entraînement, datasets, checkpoints intermédiaires, logs contenant des données personnelles{% endif %}
+
+---
+
+## Méthode de destruction
+
+*(RGPD, art. 32 — Sécurité du traitement — chiffrement et destruction sécurisée)*
+
+**Méthode appliquée** : **{{ methode }}**
+
+{% if methode == "secure_erase_aes256" or "AES" in methode %}
+Les données ont été chiffrées avec AES-256-GCM conformément à l'article 32 du
+RGPD (sécurité du traitement), puis les clés de déchiffrement ont été détruites,
+rendant les données inaccessibles de façon définitive.
+{% elif methode == "overwrite_dod5220" or "DOD" in methode %}
+Écrasement sécurisé selon la norme DoD 5220.22-M (3 passes minimum),
+suivi de vérification par lecture du support.
+{% elif methode == "physical_destruction" %}
+Destruction physique du support de stockage (broyage/déchiquetage),
+avec bordereau de déchiquetage fourni en annexe.
+{% else %}
+{{ methode }}
+{% endif %}
+
+---
+
+## Bases légales
+
+*(RGPD, Règlement UE 2016/679)*
+
+- **Article 17** (Droit à l'effacement / « droit à l'oubli ») : Le présent
+  certificat atteste l'exécution de l'obligation d'effacement des données à
+  caractère personnel dès lors que leur conservation n'est plus nécessaire.
+
+- **Article 5, § 1, point c** (Minimisation des données) : Les données ont
+  été conservées uniquement le temps nécessaire à la réalisation de la prestation
+  et supprimées immédiatement après livraison.
+
+- **Article 32** (Sécurité du traitement) : La méthode de destruction mise en
+  œuvre garantit un niveau de sécurité adapté au risque, incluant notamment
+  le chiffrement AES-256-GCM des données au repos et en transit.
+
+---
+
+## Déclaration
+
+Le Prestataire déclare :
+
+1. Qu'aucune copie des données détruites n'est conservée en sa possession,
+   chez ses sous-traitants ou dans ses systèmes de sauvegarde ;
+2. Que la destruction est **irréversible** et ne peut être annulée ;
+3. Que le présent certificat est établi de bonne foi et engage la responsabilité
+   du Prestataire en cas de fausse déclaration.
+
+---
+
+Fait à {{ lieu | default("[LIEU]") }}, le {{ date }}.
+
+**Signataire** : {{ signataire | default("[NOM DU SIGNATAIRE]") }}
+
+___________________________
+*(Signature)*
+
+---
+
+*Base légale : RGPD (Règlement UE 2016/679), article 17 (droit à l'effacement),
+article 5-1-c (minimisation des données), article 32 (sécurité du traitement —
+chiffrement AES-256-GCM, destruction sécurisée).*

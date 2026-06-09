@@ -1,0 +1,73 @@
+# Mise à Jour de Statut — {{ project_id }}
+## Date : {{ date | default("[DATE]") }}
+
+---
+
+## Avancement global
+
+**Statut** : {{ status | default("En cours") }}
+**Progression** : {{ progression | default("—") }}
+
+---
+
+## Réalisé depuis la dernière mise à jour
+
+{% if completed_items %}
+{% for item in completed_items %}
+- [x] {{ item }}
+{% endfor %}
+{% else %}
+*(Aucun élément complété)*
+{% endif %}
+
+---
+
+## En cours
+
+{% if in_progress_items %}
+{% for item in in_progress_items %}
+- [ ] {{ item }}
+{% endfor %}
+{% else %}
+*(Aucun élément en cours)*
+{% endif %}
+
+---
+
+## Prochaines étapes
+
+{% if next_steps %}
+{% for step in next_steps %}
+- {{ step }}
+{% endfor %}
+{% else %}
+*(À définir)*
+{% endif %}
+
+---
+
+## Points de vigilance / Risques
+
+{% if risques %}
+{% for risque in risques %}
+- **{{ risque.niveau | default("INFO") }}** : {{ risque.description }}
+{% endfor %}
+{% else %}
+*(Aucun risque identifié à ce stade)*
+{% endif %}
+
+---
+
+## Métriques intermédiaires
+
+{% if metriques %}
+| Métrique | Valeur |
+|----------|--------|
+{% for k, v in metriques.items() %}
+| {{ k }} | {{ v }} |
+{% endfor %}
+{% endif %}
+
+---
+
+*Mise à jour générée automatiquement par Fine-Tuning OS.*
