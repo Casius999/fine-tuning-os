@@ -1,15 +1,23 @@
 <div align="center">
 
-# fine-tuning-os
+<img src="assets/banner.svg" alt="fine-tuning-os — Zero-Data fine-tuning operations MCP server" width="100%">
 
-**Zero-Data fine-tuning operations MCP server — 64 tools for the full LLM fine-tuning delivery lifecycle, callable by Claude Code**
+# fine-tuning-os
 
 [![CI](https://github.com/Casius999/fine-tuning-os/actions/workflows/ci.yml/badge.svg)](https://github.com/Casius999/fine-tuning-os/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/Casius999/fine-tuning-os/actions/workflows/codeql.yml/badge.svg)](https://github.com/Casius999/fine-tuning-os/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Casius999/fine-tuning-os/badge)](https://scorecard.dev/viewer/?uri=github.com/Casius999/fine-tuning-os)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](./LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://www.python.org/)
-[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A595%25-brightgreen?style=flat-square)](https://github.com/Casius999/fine-tuning-os/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](./LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/MCP-server-7c3aed.svg)](https://modelcontextprotocol.io/)
+[![tools](https://img.shields.io/badge/tools-64-7c9cff.svg)](#tool-catalogue)
+[![coverage](https://img.shields.io/badge/coverage-%E2%89%A595%25-brightgreen.svg)](#testing)
+[![lint: ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://github.com/astral-sh/ruff)
+[![types: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](https://mypy-lang.org/)
+
+**The Zero-Data [Model Context Protocol](https://modelcontextprotocol.io/) control plane for LLM fine-tuning — `64` tools across `10` dimensions to prepare, build, train *in the client enclave*, evaluate, secure, package, and deliver a fine-tuned model — without ever seeing the client's data.**
+
+[Quickstart](#install) · [Architecture](#architecture) · [The 10 dimensions](#tool-catalogue) · [Zero-Data](#zero-data-contract) · [Testing](#testing) · [Security](#security-notes)
 
 </div>
 
@@ -34,6 +42,15 @@
 **fine-tuning-os** is a zero-dependency-on-secrets MCP server that exposes 64 domain tools (+ 1 health tool) for the entire LLM fine-tuning delivery workflow. It integrates into any MCP-compatible host — Claude Desktop, Claude Code, or a custom orchestrator — with **no mandatory secrets at boot**.
 
 Tools that require external services (SSH, HuggingFace, SFTP, SMTP, Slack, registries) advertise their requirements via a `dry_run` response rather than failing silently or faking execution. This means you get a fully operational server and actionable CLI commands from day one, and can progressively enable live execution by setting environment variables.
+
+### ✨ Highlights
+
+- **64 tools / 10 dimensions.** prep · synthetic · pipeline · execution · evaluation · security · packaging · docs · client · maintenance — the full fine-tuning delivery lifecycle, callable from any MCP host.
+- **Zero-Data by construction.** C1/C3 tools cannot open a socket; C2 tools dry-run (the exact command, with env-name placeholders) until you set the env var — **never a faked success**. Enforced by `tests/test_zero_data.py` on every CI run.
+- **Trains where the data lives.** The server embeds no `torch`/`unsloth`; heavy GPU work runs in the **client enclave** (or a routed engine) — only sanitized metrics/logs come back.
+- **Real artifacts you own.** AES-256-GCM encrypted deliverables + SHA256, French-law contract / NDA / data-destruction-certificate templates, performance & security reports — generated, not black-boxed.
+- **Companion skill.** A `fine-tuning-os` Claude skill (`SKILL.md` + 16 references) maps every phase to the exact tool, with go/no-go gates and a Zero-Data playbook.
+- **657 tests, ≥95% coverage**, `ruff` + `black` + `mypy` clean, Hypothesis property tests + mutation config, CI on Python 3.10–3.13 across Linux / macOS / Windows.
 
 ---
 
@@ -317,7 +334,7 @@ All configuration is through environment variables. Setting **none** of them is 
 
 ```bash
 # Full suite with coverage
-pytest --cov=src/fine_tuning_os --cov-report=term-missing --cov-fail-under=90
+pytest --cov=src/fine_tuning_os --cov-report=term-missing --cov-fail-under=95
 
 # Zero-Data invariant tests only
 pytest tests/test_zero_data.py -v
