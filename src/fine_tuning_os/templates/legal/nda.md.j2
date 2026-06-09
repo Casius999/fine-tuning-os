@@ -1,0 +1,122 @@
+# Accord de Confidentialité (NDA) — Bilatéral
+## Projet : {{ project_id | default("[PROJET]") }}
+
+> **AVERTISSEMENT LÉGAL** : Ce document constitue une base sérieuse à adapter.
+> Il ne remplace pas une relecture par un conseil juridique qualifié.
+
+---
+
+**Entre les soussignés :**
+
+**Partie A** : {{ partie_a | default("[NOM PARTIE A]") }}
+
+**Partie B** : {{ partie_b | default("[NOM PARTIE B]") }}
+
+Ci-après dénommées ensemble « les Parties » et individuellement « la Partie ».
+
+---
+
+## Article 1 — Objet
+
+*(Code de commerce, art. L151-1 et s. — Secret des affaires)*
+
+Le présent accord a pour objet de définir les conditions dans lesquelles
+les Parties échangent des informations confidentielles dans le cadre de
+{% if objet %}{{ objet }}{% else %}la prestation de fine-tuning de modèle de langage{% endif %}.
+
+---
+
+## Article 2 — Définition des informations confidentielles
+
+*(Code de commerce, art. L151-1 — Définition du secret des affaires)*
+
+Constituent des « Informations Confidentielles » au sens du présent accord
+et conformément à l'article L151-1 du Code de commerce :
+
+- Toute information qui n'est pas généralement connue ou aisément accessible
+  aux personnes familières de ce type d'informations ;
+- Qui a une valeur commerciale, effective ou potentielle, du fait de son
+  caractère secret ;
+- Qui a fait l'objet, de la part de la Partie divulgatrice, de mesures de
+  protection raisonnables pour en maintenir le caractère secret.
+
+Sont notamment concernés : données d'entraînement, architectures de modèles,
+hyperparamètres, stratégies commerciales, données clients, code source,
+résultats d'évaluation.
+
+---
+
+## Article 3 — Obligations de confidentialité
+
+*(Code de commerce, art. L151-3 et s. — Obligations de protection)*
+
+Chaque Partie s'engage à :
+
+1. Maintenir les Informations Confidentielles reçues dans le plus strict secret.
+2. Ne pas divulguer tout ou partie des Informations Confidentielles à des tiers
+   sans accord écrit préalable de la Partie divulgatrice.
+3. Mettre en œuvre des mesures de protection raisonnables, au moins équivalentes
+   à celles appliquées à ses propres informations confidentielles.
+4. N'utiliser les Informations Confidentielles qu'aux fins du projet défini à
+   l'article 1.
+
+---
+
+## Article 4 — Mesures de protection raisonnables
+
+*(Code de commerce, art. L151-1 — Mesures de protection raisonnables)*
+
+Les Parties s'engagent à maintenir des mesures de protection incluant notamment :
+- Chiffrement AES-256-GCM pour toute transmission ou stockage numérique ;
+- Accès restreint au strict besoin d'en connaître (need-to-know) ;
+- Suppression sécurisée des données après la fin de la relation contractuelle.
+
+---
+
+## Article 5 — Exceptions
+
+Les obligations de confidentialité ne s'appliquent pas aux informations :
+- Qui sont ou deviennent publiques sans violation du présent accord ;
+- Que la Partie réceptrice détenait légitimement avant la divulgation ;
+- Divulguées par un tiers habilité, sans obligation de confidentialité ;
+- Dont la divulgation est requise par la loi ou une décision de justice.
+
+---
+
+## Article 6 — Sanctions
+
+*(Code de commerce, art. L151-4 et s. — Sanctions de l'obtention, de
+l'utilisation ou de la divulgation illicites)*
+
+Toute obtention, utilisation ou divulgation illicite d'un secret des affaires
+est susceptible d'engager la responsabilité civile et/ou pénale de la Partie
+contrevenante, conformément aux articles L151-4 et suivants du Code de commerce.
+
+---
+
+## Article 7 — Durée
+
+Le présent accord prend effet à la date de signature et demeure en vigueur
+pendant une durée de **{{ duree | default("3 ans") }}** à compter de la fin
+de la relation contractuelle entre les Parties.
+
+---
+
+## Article 8 — Loi applicable et juridiction
+
+Le présent accord est régi par le droit français.
+En cas de litige, la juridiction compétente sera : **{{ juridiction | default("Tribunal de commerce de Paris") }}**.
+
+---
+
+Fait en deux exemplaires originaux, le {{ date | default("[DATE]") }}.
+
+**Partie A**                          **Partie B**
+
+___________________________           ___________________________
+{{ partie_a | default("[NOM]") }}                {{ partie_b | default("[NOM]") }}
+
+---
+
+*Base légale : Code de commerce, articles L151-1 et suivants (secret des affaires,
+définition, mesures de protection raisonnables, sanctions de la divulgation illicite).*

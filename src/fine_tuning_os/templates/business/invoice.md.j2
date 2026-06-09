@@ -1,0 +1,47 @@
+# Facture / Invoice
+## Référence : {{ invoice_ref | default("[REF]") }}
+
+---
+
+**Prestataire** : {{ prestataire_nom | default("[NOM DU PRESTATAIRE]") }}
+{{ prestataire_adresse | default("[ADRESSE]") }}
+SIRET : {{ prestataire_siret | default("[SIRET]") }}
+TVA Intracommunautaire : {{ prestataire_tva | default("[TVA]") }}
+
+**Client** : {{ client_nom | default("[NOM DU CLIENT]") }}
+{{ client_adresse | default("[ADRESSE]") }}
+
+**Date** : {{ date | default("[DATE]") }}
+**Échéance** : {{ echeance | default("[DATE ÉCHÉANCE]") }}
+**Projet** : {{ project_id | default("[PROJET]") }}
+
+---
+
+## Détail des prestations
+
+| Description | Quantité | Prix unitaire HT | Montant HT |
+|-------------|----------|-----------------|------------|
+{% for ligne in lignes | default([{"desc": "Fine-tuning de modèle", "qty": 1, "pu": "[PRIX]", "montant": "[MONTANT]"}]) %}
+| {{ ligne.desc }} | {{ ligne.qty }} | {{ ligne.pu }} € | {{ ligne.montant }} € |
+{% endfor %}
+
+---
+
+| | |
+|---|---|
+| **Sous-total HT** | {{ montant_ht | default("[HT]") }} € |
+| **TVA ({{ tva_taux | default("20") }} %)** | {{ montant_tva | default("[TVA]") }} € |
+| **TOTAL TTC** | {{ montant_ttc | default("[TTC]") }} € |
+
+---
+
+## Modalités de paiement
+
+**IBAN** : {{ iban | default("[IBAN]") }}
+**BIC** : {{ bic | default("[BIC]") }}
+
+{{ conditions_paiement | default("Paiement à 30 jours date de facture. Tout retard de paiement entraîne l'application de pénalités de retard au taux légal en vigueur.") }}
+
+---
+
+*Facture émise conformément à la réglementation française en vigueur.*
