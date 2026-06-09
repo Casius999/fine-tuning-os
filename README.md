@@ -9,7 +9,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Casius999/fine-tuning-os/badge)](https://scorecard.dev/viewer/?uri=github.com/Casius999/fine-tuning-os)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](./LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://www.python.org/)
-[![Coverage](https://img.shields.io/badge/coverage-~93%25-brightgreen?style=flat-square)](https://github.com/Casius999/fine-tuning-os/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A595%25-brightgreen?style=flat-square)](https://github.com/Casius999/fine-tuning-os/actions/workflows/ci.yml)
 
 </div>
 
@@ -329,7 +329,7 @@ pytest tests/test_registration.py -v
 python scripts/demo_bundle.py
 ```
 
-Coverage gate: **90%** (current: ~93%).
+Coverage gate: **≥95%** (CI enforced).
 
 Test structure (`tests/`):
 
@@ -347,7 +347,9 @@ tests/
 ├── test_packaging.py        # TDD + confinement regression
 ├── test_docs.py
 ├── test_client.py
-└── test_maintenance.py
+├── test_maintenance.py
+├── test_error_paths.py      # error-path coverage (OSError, TemplateError, missing-project, bad-crypto)
+└── test_property.py         # Hypothesis property-based tests (sanitize, crypto, metrics, Store)
 ```
 
 ---

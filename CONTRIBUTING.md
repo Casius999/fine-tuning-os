@@ -47,7 +47,7 @@ black --check .
 mypy src
 
 # Full test suite with coverage
-pytest --cov=src/fine_tuning_os --cov-report=term-missing --cov-fail-under=90
+pytest --cov=src/fine_tuning_os --cov-report=term-missing --cov-fail-under=95
 
 # Zero-Data invariant tests only
 pytest tests/test_zero_data.py -v
@@ -55,6 +55,27 @@ pytest tests/test_zero_data.py -v
 # Tool registration check
 pytest tests/test_registration.py -v
 ```
+
+If you have [just](https://github.com/casey/just) installed, the `Justfile` at repo root
+provides short aliases for all of the above:
+
+```bash
+just install   # pip install -e ".[dev]"
+just lint      # ruff check
+just fmt       # black .
+just typecheck # mypy src
+just test      # pytest -q
+just cov       # pytest --cov … --cov-fail-under=95
+just demo      # zero-network demo bundle
+just build     # wheel + sdist
+```
+
+### Property-based tests
+
+`tests/test_property.py` uses [Hypothesis](https://hypothesis.readthedocs.io/) to exercise
+`sanitize_text`, the AES-256-GCM crypto round-trip, `compute_metrics`, and `Store` with
+hundreds of generated inputs. These run as part of the normal `pytest` suite. If you add a
+pure, deterministic function, consider adding a `@given` test for it.
 
 ## Workflow
 
@@ -68,7 +89,7 @@ pytest tests/test_registration.py -v
 ## Quality bar
 
 - Tests required for new behaviour and bug fixes.
-- **Coverage gate: 90%** (CI enforced). Aspiration: 95%.
+- **Coverage gate: 95%** (CI enforced).
 - `ruff check` and `black --check` must be clean.
 - No secrets, credentials, or PII in commits or history.
 - Keep functions small (< 50 lines) and files focused (< 800 lines).
@@ -83,6 +104,29 @@ pytest tests/test_registration.py -v
 4. Add at least one unit test in the matching `tests/test_<module>.py`.
 5. Update the Tool Catalogue in `README.md`.
 6. The `test_registration.py` total count check will need updating if you add tools.
+
+## Mutation testing (opt-in)
+
+Mutation testing is **not** part of the CI gate — it is too slow to run on every push. Run it
+locally when evaluating test suite robustness:
+
+```bash
+# Run full mutation suite (may take several minutes)
+mutmut run
+
+# Show surviving mutants after a run
+mutmut results
+
+# Show the diff for a specific surviving mutant
+mutmut show <id>
+```
+
+Configuration lives in `[tool.mutmut]` in `pyproject.toml`:
+- `paths_to_mutate = "src/fine_tuning_os/"` — source under mutation
+- `tests_dir = "tests/"` — test directory
+- `runner = "python -m pytest -x -q"` — fast-fail runner
+
+A mutation score ≥ 80% is the informal bar before merging significant new modules.
 
 ## Reporting bugs / requesting features
 

@@ -1,0 +1,46 @@
+# OSV-Scanner — vulnerability scanning for dependencies and source
+# Runs on push to main, pull requests, and weekly to catch newly-published CVEs.
+# Results are uploaded to GitHub Code Scanning (SARIF).
+# SHA-pinned actions; top-level permissions deny-all, widened per job.
+name: OSV-Scanner
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1" # weekly Monday 05:17 UTC
+
+# Deny-all by default; widen per job.
+permissions: {}
+
+jobs:
+  osv-scan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write # required for SARIF upload to code scanning
+      actions: read          # required for harden-runner
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Run OSV-Scanner
+        uses: google/osv-scanner-action@dc892dda1b63af9ef97e00e2c81a86a1da3ee3f0 # v2.0.2
+        with:
+          scan-args: |-
+            --output=results.sarif
+            --format=sarif
+            --recursive
+            ./
+        continue-on-error: true # upload SARIF even when vulnerabilities are found
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@28deaeda66e23a1f8d7e60b0fd104a9b0b9e47e2 # v3.28.16
+        with:
+          sarif_file: results.sarif
