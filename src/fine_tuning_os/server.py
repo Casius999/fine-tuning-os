@@ -19,9 +19,11 @@ from .targets import resolve_target
 mcp = FastMCP("fine-tuning-os")
 
 from .tools import (  # noqa: E402
+    client,
     docs,
     evaluation,
     execution,
+    maintenance,
     packaging,
     pipeline,
     prep,
@@ -37,6 +39,8 @@ evaluation.register(mcp)
 security.register(mcp)
 packaging.register(mcp)
 docs.register(mcp)
+client.register(mcp)
+maintenance.register(mcp)
 
 _TARGET_KINDS: tuple[str, ...] = (
     "ssh",
