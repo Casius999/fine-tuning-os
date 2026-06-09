@@ -7,6 +7,7 @@ name: Release Please
 on:
   push:
     branches: ["main"]
+  workflow_dispatch: # manual re-trigger (e.g. after adding RELEASE_PLEASE_TOKEN)
 
 permissions: {}
 
@@ -26,8 +27,9 @@ jobs:
           egress-policy: audit
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
         with:
-          # NOTE: the default GITHUB_TOKEN will NOT trigger downstream workflows (e.g. sbom-attest)
-          # on the created tag. To chain them, supply a PAT or GitHub App token here:
-          # token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          # Dedicated PAT (contents:write + pull-requests:write) lets release-please create the
+          # release PR and chains downstream workflows (sbom-attest) on the created tag.
+          # Falls back to GITHUB_TOKEN until the secret is set (PR creation requires the PAT).
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
