@@ -81,7 +81,7 @@ Add to `claude_desktop_config.json`:
 | `FTOS_SFTP_KEY` | C2 | Path to SFTP private key | — |
 | `FTOS_SMTP_HOST` | C2 | SMTP host for `send_status_update` | — |
 | `FTOS_SMTP_USER` | C2 | SMTP username | — |
-| `FTOS_SMTP_PASS` | C2 | SMTP password | — |
+| `FTOS_SMTP_PASSWORD` | C2 | SMTP password | — |
 | `FTOS_SLACK_WEBHOOK` | C2 | Slack incoming webhook URL for notifications | — |
 | `FTOS_CALENDLY_TOKEN` | C2 | Calendly API token for `schedule_meeting` | — |
 | `FTOS_GIT_REMOTE` | C2 | Git remote URL for `self_update` | — |
