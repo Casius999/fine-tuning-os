@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       - name: Run OSV-Scanner
-        uses: google/osv-scanner-action@dc892dda1b63af9ef97e00e2c81a86a1da3ee3f0 # v2.0.2
+        uses: google/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: |-
             --output=results.sarif
@@ -41,6 +41,6 @@ jobs:
         continue-on-error: true # upload SARIF even when vulnerabilities are found
 
       - name: Upload SARIF to code scanning
-        uses: github/codeql-action/upload-sarif@28deaeda66e23a1f8d7e60b0fd104a9b0b9e47e2 # v3.28.16
+        uses: github/codeql-action/upload-sarif@2d92b76c45b91eb80fc44c74ce3fce0ee94e8f9d # v3.30.0
         with:
           sarif_file: results.sarif
