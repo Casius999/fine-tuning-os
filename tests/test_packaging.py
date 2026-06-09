@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_packaging.py
 """TDD tests for packaging.py tools (39–46).
 

@@ -1,0 +1,29 @@
+# Dependabot — native GitHub dependency + Actions updates.
+# The github-actions ecosystem is REQUIRED so your SHA-pinned actions get bumped automatically.
+# Use this OR renovate.json (both are shipped; do not run both for the same ecosystems).
+version: 2
+updates:
+  # Keep pinned GitHub Actions SHAs current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "ci"
+    labels: ["dependencies", "github-actions"]
+
+  # Python dependencies via pip.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "build"
+    labels: ["dependencies", "python"]

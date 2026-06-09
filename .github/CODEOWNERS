@@ -1,0 +1,20 @@
+# CODEOWNERS — auto-requests reviews per path. Last matching pattern wins.
+# Pair with a ruleset that requires Code Owner review to make it enforcing.
+
+# Default owner for everything in the repo.
+*                       @Casius999
+
+# Source code.
+/src/                   @Casius999
+
+# CI/CD and security-sensitive workflows.
+/.github/workflows/     @Casius999
+/.github/               @Casius999
+
+# Documentation.
+*.md                    @Casius999
+/docs/                  @Casius999
+
+# Dependency + supply-chain config.
+/.github/dependabot.yml @Casius999
+/renovate.json          @Casius999

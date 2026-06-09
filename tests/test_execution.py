@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_execution.py
 """TDD tests for execution.py tools (18–25).
 

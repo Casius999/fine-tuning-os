@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/server.py
 """Fine-Tuning OS — MCP server bootstrap.
 

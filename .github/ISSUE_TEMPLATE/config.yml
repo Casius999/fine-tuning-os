@@ -1,0 +1,9 @@
+# Disable blank issues so everything goes through a structured form.
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/Casius999/fine-tuning-os/discussions
+    about: Ask questions and discuss ideas here instead of opening an issue.
+  - name: Report a security vulnerability (private)
+    url: https://github.com/Casius999/fine-tuning-os/security/advisories/new
+    about: Do NOT open a public issue for security problems. Use private vulnerability reporting.

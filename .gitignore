@@ -11,14 +11,40 @@ venv/
 # Test / coverage
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
+.mutmut-cache
+.hypothesis/
+.tox/
 
 # Tooling
 .ruff_cache/
 .mypy_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+
+# Logs / temp
+*.log
+tmp/
+.cache/
 
 # Workspace / runtime artifacts (Zero-Data: never commit project data)
 ftos-workspace/
 *.enc
 *.key
 .env
+.env.*
+!.env.example
+*.pem
+secrets.*
+
+# Local-only SBOM / scan outputs
+sbom.*.json
+results.sarif

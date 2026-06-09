@@ -1,0 +1,28 @@
+# lefthook — fast, parallel git hooks (single Go binary). Alternative to pre-commit.
+# Install: `lefthook install`. Uses the project's own toolchain versions.
+# This is an alternative to .pre-commit-config.yaml; use one or the other per team preference.
+pre-commit:
+  parallel: true
+  commands:
+    ruff-lint:
+      glob: "*.py"
+      run: python -m ruff check --fix {staged_files}
+      stage_fixed: true
+    black-format:
+      glob: "*.py"
+      run: python -m black {staged_files}
+      stage_fixed: true
+    gitleaks:
+      run: gitleaks protect --staged --redact --no-banner
+
+commit-msg:
+  commands:
+    conventional-commit:
+      # Validates the commit message against Conventional Commits via commitlint.
+      # Requires: npm i -D @commitlint/cli @commitlint/config-conventional
+      run: npx --no-install commitlint --edit {1}
+
+pre-push:
+  commands:
+    test:
+      run: python -m pytest --cov=src/fine_tuning_os --cov-fail-under=90

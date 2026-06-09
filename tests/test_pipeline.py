@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_pipeline.py
 """TDD tests for pipeline.py tools (11–17).
 

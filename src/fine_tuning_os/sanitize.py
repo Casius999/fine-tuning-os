@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/sanitize.py
 """Zero-Data text/log sanitization filters.
 

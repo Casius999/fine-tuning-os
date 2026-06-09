@@ -1,0 +1,50 @@
+name: Feature request
+description: Propose a new capability or enhancement.
+title: "feat: <short summary>"
+labels: ["enhancement", "triage"]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues/discussions and this is not a duplicate.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem does this solve? Who benefits? Which fine-tuning workflow step?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior or new MCP tool API.
+    validations:
+      required: true
+  - type: dropdown
+    id: zero_data_class
+    attributes:
+      label: Zero-Data class (if a new tool)
+      description: Which class does this tool belong to?
+      options:
+        - "C1 — Pure/Offline (no network, no secrets)"
+        - "C2 — Emit/Dry-run (optional env var enables live mode)"
+        - "C3 — Static Audit (reads local files, no network)"
+        - "Not a new tool"
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+    validations:
+      required: false

@@ -1,0 +1,4 @@
+# asdf / mise .tool-versions — fallback for teams still on asdf. Prefer mise.toml for new repos.
+# One tool per line: <plugin> <version>. Keep only what you use.
+python 3.12.7
+# nodejs 22.11.0   # needed only if using commitlint / lefthook JS tooling

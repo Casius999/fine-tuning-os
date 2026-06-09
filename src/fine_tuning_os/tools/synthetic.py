@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/synthetic.py
 """Lot 2 — Tool 7: generate_synthetic_dataset (C1, offline, deterministic)."""
 

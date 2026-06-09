@@ -1,8 +1,39 @@
-# Fine-Tuning OS — MCP Server
+<div align="center">
 
-Zero-Data MCP server for LLM fine-tuning operations. 65 tools (64 domain + health) covering the full fine-tuning lifecycle: data preparation, synthetic generation, pipeline, remote execution, evaluation, security auditing, packaging, documentation, client management, and maintenance.
+# fine-tuning-os
 
-Integrates into any MCP-compatible host (Claude Desktop, Claude Code, custom orchestrator) with **no mandatory secrets at boot**. Tools that require external services advertise their requirements via a `dry_run` response rather than failing or faking success.
+**Zero-Data fine-tuning operations MCP server — 64 tools for the full LLM fine-tuning delivery lifecycle, callable by Claude Code**
+
+[![CI](https://github.com/Casius999/fine-tuning-os/actions/workflows/ci.yml/badge.svg)](https://github.com/Casius999/fine-tuning-os/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Casius999/fine-tuning-os/actions/workflows/codeql.yml/badge.svg)](https://github.com/Casius999/fine-tuning-os/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Casius999/fine-tuning-os/badge)](https://scorecard.dev/viewer/?uri=github.com/Casius999/fine-tuning-os)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](./LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://www.python.org/)
+[![Coverage](https://img.shields.io/badge/coverage-~93%25-brightgreen?style=flat-square)](https://github.com/Casius999/fine-tuning-os/actions/workflows/ci.yml)
+
+</div>
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Zero-Data Contract](#zero-data-contract)
+- [Architecture](#architecture)
+- [Install](#install)
+- [Run](#run)
+- [Configuration](#configuration)
+- [Tool Catalogue](#tool-catalogue)
+- [Testing](#testing)
+- [Security Notes](#security-notes)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Overview
+
+**fine-tuning-os** is a zero-dependency-on-secrets MCP server that exposes 64 domain tools (+ 1 health tool) for the entire LLM fine-tuning delivery workflow. It integrates into any MCP-compatible host — Claude Desktop, Claude Code, or a custom orchestrator — with **no mandatory secrets at boot**.
+
+Tools that require external services (SSH, HuggingFace, SFTP, SMTP, Slack, registries) advertise their requirements via a `dry_run` response rather than failing silently or faking execution. This means you get a fully operational server and actionable CLI commands from day one, and can progressively enable live execution by setting environment variables.
 
 ---
 
@@ -16,12 +47,69 @@ Every tool belongs to one of three classes:
 | **C2** — Emit/Dry-run | Builds and returns an actionable command or payload; if the required env var is absent returns `meta.executed=False, meta.dry_run=True` and never fakes execution | Only when env is configured | Optional (enables live mode) |
 | **C3** — Static Audit | Reads local files/config and returns a structured report | Never | None |
 
-Guarantees enforced by `tests/test_zero_data.py`:
+Guarantees enforced by `tests/test_zero_data.py` on every CI run:
 
 1. C1 and C3 tools cannot open sockets (socket patched to raise on any attempt).
 2. C2 tools with no env configured return `executed=False, dry_run=True` and open no sockets.
-3. 65 tools are registered at server boot with zero env vars set.
-4. No file is written outside the configured workspace root (`FTOS_WORKSPACE`).
+3. 65 tools registered at server boot with zero env vars set.
+4. No file written outside the configured workspace root (`FTOS_WORKSPACE`).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Host["MCP Host (Claude Code / Claude Desktop)"]
+        CC[Claude Code]
+    end
+
+    subgraph Server["fine-tuning-os MCP Server (stdio)"]
+        S[server.py\nFastMCP + 65 tools]
+
+        subgraph Socle["Socle / Infrastructure"]
+            ST[store.py\nFilesystem abstraction]
+            TG[targets.py\ngate() — env-based C2 activation]
+            MD[models.py\nResponse dataclasses]
+            CR[crypto.py\nAES-256 encryption]
+            SN[sanitize.py\nSecret/PII stripping]
+            RE[render.py\nMarkdown → PDF]
+        end
+
+        subgraph Tools["10 Tool Modules"]
+            T1[prep\n9 tools]
+            T2[synthetic\n1 tool]
+            T3[pipeline\n7 tools]
+            T4[execution\n8 tools]
+            T5[evaluation\n7 tools]
+            T6[security\n6 tools C3]
+            T7[packaging\n8 tools]
+            T8[docs\n8 tools]
+            T9[client\n6 tools]
+            T10[maintenance\n4 tools]
+        end
+    end
+
+    subgraph Boundary["Zero-Data Boundary"]
+        direction LR
+        ZD["C1/C3: socket=BLOCKED\nC2: dry_run when no env\nAll writes: FTOS_WORKSPACE only"]
+    end
+
+    subgraph Enclave["Client Enclave (optional)"]
+        HF[HuggingFace API]
+        SSH[Remote GPU server\nSSH]
+        REG[Container Registry]
+        SFTP[SFTP / SMTP / Slack]
+    end
+
+    CC <-->|MCP stdio protocol| S
+    S --> Socle
+    S --> Tools
+    Tools --> Boundary
+    Boundary -.->|C2 live mode\nonly when env set| Enclave
+```
+
+The server registers all 65 tools at startup. C2 tools call `gate()` from `targets.py` to check whether the required environment variable is set; if not, they return the dry-run command without touching the network.
 
 ---
 
@@ -32,7 +120,7 @@ Guarantees enforced by `tests/test_zero_data.py`:
 git clone https://github.com/Casius999/fine-tuning-os.git
 cd fine-tuning-os
 
-# Create virtual environment (Python 3.11+)
+# Create virtual environment (Python 3.10+)
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # Linux / macOS
@@ -41,13 +129,24 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-## Run (stdio transport — for Claude Desktop / Claude Code)
+Optional PDF export support (requires system libraries):
+
+```bash
+pip install -e ".[pdf]"
+```
+
+---
+
+## Run
+
+### stdio transport (Claude Desktop / Claude Code)
 
 ```bash
 python -m fine_tuning_os
+# or: fine-tuning-os
 ```
 
-Add to `claude_desktop_config.json`:
+### Claude Desktop config (`claude_desktop_config.json`)
 
 ```json
 {
@@ -65,7 +164,9 @@ Add to `claude_desktop_config.json`:
 
 ---
 
-## Environment Variables
+## Configuration
+
+All configuration is through environment variables. Setting **none** of them is valid — the server starts and all tools respond (C2 tools return dry-run commands).
 
 | Variable | Class | Description | Default |
 |----------|-------|-------------|---------|
@@ -85,8 +186,6 @@ Add to `claude_desktop_config.json`:
 | `FTOS_SLACK_WEBHOOK` | C2 | Slack incoming webhook URL for notifications | — |
 | `FTOS_CALENDLY_TOKEN` | C2 | Calendly API token for `schedule_meeting` | — |
 | `FTOS_GIT_REMOTE` | C2 | Git remote URL for `self_update` | — |
-
-Setting none of these variables is valid. The server starts and all tools respond. C2 tools return their dry-run command so you can inspect, copy, and run manually.
 
 ---
 
@@ -218,19 +317,19 @@ Setting none of these variables is valid. The server starts and all tools respon
 
 ```bash
 # Full suite with coverage
-pytest --cov=src --cov-report=term-missing
+pytest --cov=src/fine_tuning_os --cov-report=term-missing --cov-fail-under=90
 
-# Zero-Data guard only
+# Zero-Data invariant tests only
 pytest tests/test_zero_data.py -v
 
-# Packaging module TDD tests
-pytest tests/test_packaging.py -v
-
-# Registration check (65 tools)
+# Tool registration check (65 tools)
 pytest tests/test_registration.py -v
+
+# Run the synthetic demo bundle (no network, no secrets needed)
+python scripts/demo_bundle.py
 ```
 
-Coverage target: ≥80% (currently ~93%).
+Coverage gate: **90%** (current: ~93%).
 
 Test structure (`tests/`):
 
@@ -253,47 +352,32 @@ tests/
 
 ---
 
-## Security & Zero-Data Notes
+## Security Notes
 
 - **No secret on disk.** All credentials are read from environment variables at call time via `targets.py:gate()`. No secret is ever written to files or returned in tool output values.
-- **Filesystem confinement.** Every tool that writes files resolves the destination through `Store.project_dir(project_id)`, which is anchored under `FTOS_WORKSPACE`. Writing to a relative path (e.g., `./docker/`) is rejected with an explicit error.
-- **Sanitize before returning.** The `sanitize_logs_for_claude` tool strips secrets and PII from text before it is surfaced to the orchestrating model. Use it before passing log output to any LLM.
+- **Filesystem confinement.** Every tool that writes files resolves the destination through `Store.project_dir(project_id)`, anchored under `FTOS_WORKSPACE`. Writing outside is rejected with an explicit error.
+- **Sanitize before returning.** Use `sanitize_logs_for_claude` to strip secrets and PII from logs before passing output to any LLM.
 - **C2 dry_run is safe.** The returned `command` string contains only env var name references (e.g., `$HF_TOKEN`), never literal secret values.
-- **No network for C1/C3.** Pure and audit tools cannot open sockets. This is verified by the test suite on every CI run.
+- **No network for C1/C3.** Verified by the test suite on every CI run.
+
+Found a vulnerability? See [SECURITY.md](./SECURITY.md) — report privately, do **not** open a public issue.
 
 ---
 
-## Legal Notice (French Law)
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](./CONTRIBUTING.md) and our
+[Code of Conduct](./CODE_OF_CONDUCT.md). Commits follow
+[Conventional Commits](https://www.conventionalcommits.org/).
+
+---
+
+## Legal Notice
 
 Ce logiciel est fourni à titre d'outil d'assistance technique. Il ne constitue pas un conseil juridique, fiscal, ou professionnel. Les documents générés (contrats, NDA, factures) sont des modèles à soumettre à un professionnel qualifié avant tout usage. L'utilisateur reste seul responsable de l'usage qu'il fait des outils et des sorties produites.
 
 ---
 
-## Architecture
-
-```
-src/fine_tuning_os/
-├── server.py          # FastMCP server, registers all 65 tools
-├── store.py           # Store / project_dir — filesystem abstraction
-├── targets.py         # gate() — env-based C2 activation
-├── models.py          # Response dataclasses (ok / fail / meta)
-└── tools/
-    ├── prep.py        # 9 tools
-    ├── synthetic.py   # 1 tool
-    ├── pipeline.py    # 7 tools
-    ├── execution.py   # 8 tools
-    ├── evaluation.py  # 7 tools
-    ├── security.py    # 6 tools
-    ├── packaging.py   # 8 tools
-    ├── docs.py        # 8 tools
-    ├── client.py      # 6 tools
-    └── maintenance.py # 4 tools
-```
-
-Each module exposes `_MCP_TOOLS: list[tuple[Callable, str]]` and a `register(mcp)` function. `server.py` imports and calls every `register()` at startup.
-
----
-
 ## License
 
-MIT — see `LICENSE`.
+Licensed under the [Apache-2.0](./LICENSE) license. © 2026 Casius999.

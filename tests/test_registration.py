@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_registration.py
 """Assert all 65 tools (64 domain + ftos_health) are registered on the MCP instance."""
 

@@ -17,7 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = ["weasyprint>=62"]
-dev = ["pytest>=8.0", "pytest-cov>=5.0", "black>=24.0", "ruff>=0.4"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "black>=24.0", "ruff>=0.4", "mypy>=1.10"]
 
 [project.scripts]
 fine-tuning-os = "fine_tuning_os.server:main"
@@ -42,3 +42,12 @@ line-length = 100
 
 [tool.black]
 line-length = 100
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# The project uses MCP's dynamic tool decorator which returns `object`; suppress attr-defined noise.
+# Some internal functions have partial annotations; misc and arg-type are advisory only.
+disable_error_code = ["attr-defined", "misc", "arg-type"]
+# weasyprint is an optional dep and may not be installed; already covered by ignore_missing_imports.
+exclude = ["src/fine_tuning_os/templates/"]

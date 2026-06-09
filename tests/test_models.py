@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_models.py
 """Tests for shared Pydantic DTOs (models.py)."""
 

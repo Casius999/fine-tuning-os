@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_main.py
 """`python -m fine_tuning_os` entry point wiring."""
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_docs.py
 """TDD tests for docs.py tools (47–54).
 

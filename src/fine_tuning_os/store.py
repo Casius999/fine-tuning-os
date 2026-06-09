@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/store.py
 """Project workspace + JSON state persistence.
 

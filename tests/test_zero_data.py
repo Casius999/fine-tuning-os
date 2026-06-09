@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_zero_data.py
 """§10 Zero-Data Guard Tests — Four invariant groups.
 

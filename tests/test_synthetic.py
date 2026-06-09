@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_synthetic.py
 """Tests for synthetic.py tools (tool 7: generate_synthetic_dataset)."""
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_client.py
 """TDD tests for client.py tools (55-60).
 

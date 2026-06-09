@@ -1,0 +1,30 @@
+# mise — pins tool versions + env + tasks (the 2026 asdf successor).
+# Usage: `mise install` (installs pinned tools), `mise run ci`. Add a lockfile with
+# `mise install` + `mise settings set lockfile true` for reproducible installs (mise.lock).
+[tools]
+python = "3.12"
+# node = "22"   # needed only if using commitlint / lefthook JS tooling
+
+[env]
+PYTHONDONTWRITEBYTECODE = "1"
+# _.file = ".env"   # load a dotenv file if present
+
+[tasks.setup]
+description = "Install project dependencies"
+run = "pip install -e \".[dev]\""
+
+[tasks.lint]
+description = "Lint + format check"
+run = ["python -m ruff check --output-format=github .", "python -m black --check ."]
+
+[tasks.typecheck]
+description = "Static type checking"
+run = "python -m mypy src"
+
+[tasks.test]
+description = "Run tests with coverage gate"
+run = "python -m pytest --cov=src/fine_tuning_os --cov-fail-under=90"
+
+[tasks.ci]
+description = "Full local CI gate"
+depends = ["lint", "typecheck", "test"]

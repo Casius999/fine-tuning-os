@@ -1,0 +1,23 @@
+# REUSE.toml — machine-verifiable licensing (REUSE spec 3.3). Run `reuse lint` in CI.
+# Put each license's text under LICENSES/<SPDX-id>.txt (`reuse download Apache-2.0`).
+# This is the modern method; do NOT also keep a .reuse/dep5 file (mutually exclusive).
+# Prefer per-file SPDX headers in source; use this for directories that cannot carry headers.
+version = 1
+
+[[annotations]]
+path = "skills/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Casius999 <casius4126@gmail.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["docs/**", "**.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Casius999 <casius4126@gmail.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "scripts/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Casius999 <casius4126@gmail.com>"
+SPDX-License-Identifier = "Apache-2.0"

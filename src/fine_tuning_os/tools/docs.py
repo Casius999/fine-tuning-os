@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/docs.py
 """Lot 5 — Documentation tools 47-54.
 

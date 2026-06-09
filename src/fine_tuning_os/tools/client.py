@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # src/fine_tuning_os/tools/client.py
 """Lot 6 — Client relationship tools 55-60.
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/test_sanitize.py
 from fine_tuning_os.sanitize import sanitize_text
 

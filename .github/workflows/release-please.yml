@@ -1,0 +1,33 @@
+# Release automation via release-please (PR-gated, Conventional Commits -> SemVer + CHANGELOG).
+# Merging the auto-maintained "release PR" tags the release and creates a GitHub Release, which
+# then triggers sbom-attest.yml (on: release published).
+# Config: release-please-config.json + .release-please-manifest.json at repo root.
+name: Release Please
+
+on:
+  push:
+    branches: ["main"]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false # never cancel a release in flight
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create tags/releases + update CHANGELOG
+      pull-requests: write # maintain the release PR
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        with:
+          # NOTE: the default GITHUB_TOKEN will NOT trigger downstream workflows (e.g. sbom-attest)
+          # on the created tag. To chain them, supply a PAT or GitHub App token here:
+          # token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
