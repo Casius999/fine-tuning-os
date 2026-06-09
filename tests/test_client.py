@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from fine_tuning_os.tools import client
@@ -108,7 +109,7 @@ class TestSendStatusUpdate:
         assert result["success"] is True
         assert result["meta"]["dry_run"] is True
         assert result["meta"]["executed"] is False
-        assert "message" in result["data"] or "command" in result["data"]
+        assert "message" in result["data"]
 
     def test_dry_run_no_smtp_called(
         self,
@@ -588,11 +589,46 @@ class TestClientErrorPaths:
             )
         assert result["success"] is False
 
+    def test_send_status_update_slack_http_4xx_fails(
+        self, store: Any, project_id: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Slack returning HTTP 401 → raise_for_status → success=False."""
+        monkeypatch.delenv("FTOS_SMTP_HOST", raising=False)
+        monkeypatch.delenv("FTOS_SMTP_USER", raising=False)
+        monkeypatch.delenv("FTOS_SMTP_PASSWORD", raising=False)
+        monkeypatch.setenv("FTOS_SLACK_WEBHOOK", "https://hooks.slack.com/xxx")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "401 Unauthorized", request=MagicMock(), response=MagicMock()
+        )
+        with patch("fine_tuning_os.tools.client.httpx") as mock_httpx:
+            mock_httpx.post.return_value = mock_resp
+            mock_httpx.HTTPStatusError = httpx.HTTPStatusError
+            result = client.send_status_update(
+                project_id=project_id, subject="S", body="B", store=store
+            )
+        assert result["success"] is False
+
     def test_schedule_meeting_calendly_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Calendly configured but raises → fail."""
         monkeypatch.setenv("FTOS_CALENDLY_TOKEN", "tok")
         with patch("fine_tuning_os.tools.client.httpx") as mock_httpx:
             mock_httpx.get.side_effect = OSError("timeout")
+            result = client.schedule_meeting(duration=30, window="next-week")
+        assert result["success"] is False
+
+    def test_schedule_meeting_calendly_http_400_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Calendly returning HTTP 400 → raise_for_status → success=False."""
+        monkeypatch.setenv("FTOS_CALENDLY_TOKEN", "tok")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "400 Bad Request", request=MagicMock(), response=MagicMock()
+        )
+        with patch("fine_tuning_os.tools.client.httpx") as mock_httpx:
+            mock_httpx.get.return_value = mock_resp
+            mock_httpx.HTTPStatusError = httpx.HTTPStatusError
             result = client.schedule_meeting(duration=30, window="next-week")
         assert result["success"] is False
 

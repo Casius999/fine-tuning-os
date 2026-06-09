@@ -64,6 +64,205 @@ def _try_pdf(md_path: Path) -> tuple[str | None, str | None]:
 
 
 # ---------------------------------------------------------------------------
+# C2 private helpers for send_status_update
+# ---------------------------------------------------------------------------
+
+
+def _send_smtp(
+    cfg: dict[str, Any],
+    subject: str,
+    rendered: str,
+    recipient: str | None,
+    smtp_meta: dict[str, Any],
+) -> dict[str, Any]:
+    """Send a status update via SMTP and return an envelope dict."""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = cfg["FTOS_SMTP_USER"]
+        msg["To"] = recipient or cfg["FTOS_SMTP_USER"]
+        msg.attach(MIMEText(rendered, "plain", "utf-8"))
+
+        with smtplib.SMTP(cfg["FTOS_SMTP_HOST"], timeout=30) as server:
+            server.starttls()
+            server.login(cfg["FTOS_SMTP_USER"], cfg["FTOS_SMTP_PASSWORD"])
+            server.send_message(msg)
+
+        return ok(
+            {
+                "message": rendered,
+                "channel": "smtp",
+                "host_env": "FTOS_SMTP_HOST",
+                "recipient": recipient or "[FTOS_SMTP_USER]",
+            },
+            **smtp_meta,
+        ).to_dict()
+    except Exception as exc:  # noqa: BLE001
+        return fail(f"smtp error: {exc}").to_dict()
+
+
+def _send_slack(
+    cfg: dict[str, Any],
+    subject: str,
+    body: str,
+    rendered: str,
+    slack_meta: dict[str, Any],
+) -> dict[str, Any]:
+    """Post a status update to a Slack webhook and return an envelope dict."""
+    try:
+        resp = httpx.post(
+            cfg["FTOS_SLACK_WEBHOOK"],
+            json={"text": f"*{subject}*\n\n{body}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        raw = resp.text
+        sanitized, _ = sanitize_text(raw)
+        return ok(
+            {
+                "message": rendered,
+                "channel": "slack",
+                "webhook_env": "FTOS_SLACK_WEBHOOK",
+                "response": sanitized,
+            },
+            **slack_meta,
+        ).to_dict()
+    except Exception as exc:  # noqa: BLE001
+        return fail(f"slack error: {exc}").to_dict()
+
+
+def _render_status_update(project_id: str, subject: str, body: str) -> tuple[str | None, str]:
+    """Render the status_update template. Returns (rendered, error_or_empty)."""
+    try:
+        rendered = render_template(
+            "business/status_update.md.j2",
+            project_id=project_id,
+            date=_now_iso(),
+            status=subject,
+            progression=None,
+            completed_items=[body],
+            in_progress_items=[],
+            next_steps=[],
+            risques=[],
+            metriques={},
+        )
+        return rendered, ""
+    except Exception as exc:  # noqa: BLE001
+        return None, f"template error: {exc}"
+
+
+def _fetch_calendly_slots(
+    cfg: dict[str, Any],
+    dry_command: str,
+    duration: int,
+    window: str,
+    meta: dict[str, Any],
+) -> dict[str, Any]:
+    """Call the Calendly API and return an envelope dict."""
+    try:
+        resp = httpx.get(
+            "https://api.calendly.com/event_types",
+            headers={
+                "Authorization": f"Bearer {cfg['FTOS_CALENDLY_TOKEN']}",
+                "Content-Type": "application/json",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+        sanitized_str, _ = sanitize_text(str(raw))
+        scheduling_url = raw.get("scheduling_url") or raw.get("resource", {}).get(
+            "scheduling_url", ""
+        )
+        san_url, _ = sanitize_text(str(scheduling_url))
+        return ok(
+            {
+                "command": dry_command,
+                "scheduling_url": san_url,
+                "duration": duration,
+                "window": window,
+            },
+            **meta,
+        ).to_dict()
+    except Exception as exc:  # noqa: BLE001
+        return fail(f"calendly error: {exc}").to_dict()
+
+
+def _compute_invoice_totals(
+    lines: list[dict[str, Any]],
+) -> tuple[float | None, int, float, float, str]:
+    """Compute (subtotal, tva_rate, tva_amt, ttc, error). On error subtotal is None."""
+    try:
+        subtotal = sum(float(ln.get("montant", 0)) for ln in lines)
+        tva_rate = 20
+        tva_amt = round(subtotal * tva_rate / 100, 2)
+        ttc = round(subtotal + tva_amt, 2)
+        return subtotal, tva_rate, tva_amt, ttc, ""
+    except (TypeError, ValueError) as exc:
+        return None, 0, 0.0, 0.0, f"invalid line amounts: {exc}"
+
+
+def _map_invoice_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalise raw line dicts to the keys expected by the invoice template."""
+    return [
+        {
+            "desc": ln.get("desc", ln.get("label", "")),
+            "qty": ln.get("qty", 1),
+            "pu": ln.get("pu", ln.get("amount", 0)),
+            "montant": ln.get("montant", ln.get("amount", 0)),
+        }
+        for ln in lines
+    ]
+
+
+def _write_invoice_md(project_id: str, content: str, store: Store) -> tuple[Path | None, str]:
+    """Write invoice content atomically; return (dest_path, error_or_empty)."""
+    try:
+        dest = store.project_dir(project_id) / "deliverables" / "invoice.md"
+        write_text_atomic(dest, content)
+        return dest, ""
+    except (ValueError, OSError) as exc:
+        return None, str(exc)
+
+
+def _render_invoice_content(
+    project_id: str,
+    ref: str,
+    prestataire_nom: str,
+    client_nom: str,
+    date_str: str,
+    template_lines: list[dict[str, Any]],
+    subtotal: float,
+    tva_rate: int,
+    tva_amt: float,
+    ttc: float,
+    conditions_paiement: str | None,
+) -> tuple[str | None, str]:
+    """Render the invoice template. Returns (content, error_or_empty)."""
+    try:
+        content = render_template(
+            "business/invoice.md.j2",
+            project_id=project_id,
+            invoice_ref=ref,
+            prestataire_nom=prestataire_nom,
+            client_nom=client_nom,
+            date=date_str,
+            echeance=None,
+            lignes=template_lines,
+            montant_ht=subtotal,
+            tva_taux=tva_rate,
+            montant_tva=tva_amt,
+            montant_ttc=ttc,
+            iban=None,
+            bic=None,
+            conditions_paiement=conditions_paiement,
+        )
+        return content, ""
+    except Exception as exc:  # noqa: BLE001
+        return None, f"template error: {exc}"
+
+
+# ---------------------------------------------------------------------------
 # Tool 55: onboard_client (C1)
 # ---------------------------------------------------------------------------
 
@@ -126,75 +325,25 @@ def send_status_update(
         return fail("project_id must not be empty").to_dict()
 
     # Render the template (offline, always)
-    try:
-        rendered = render_template(
-            "business/status_update.md.j2",
-            project_id=project_id,
-            date=_now_iso(),
-            status=subject,
-            progression=None,
-            completed_items=[body],
-            in_progress_items=[],
-            next_steps=[],
-            risques=[],
-            metriques={},
-        )
-    except Exception as exc:  # noqa: BLE001
-        return fail(f"template error: {exc}").to_dict()
+    rendered, err = _render_status_update(project_id, subject, body)
+    if rendered is None:
+        return fail(err).to_dict()
 
     # Try SMTP first
     smtp_configured, smtp_meta = gate("smtp")
     if smtp_configured:
         cfg = _get_target_config("smtp")
-        assert cfg is not None  # gate guarantees this
-        try:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = cfg["FTOS_SMTP_USER"]
-            msg["To"] = recipient or cfg["FTOS_SMTP_USER"]
-            msg.attach(MIMEText(rendered, "plain", "utf-8"))
-
-            with smtplib.SMTP(cfg["FTOS_SMTP_HOST"]) as server:
-                server.starttls()
-                server.login(cfg["FTOS_SMTP_USER"], cfg["FTOS_SMTP_PASSWORD"])
-                server.send_message(msg)
-
-            return ok(
-                {
-                    "message": rendered,
-                    "channel": "smtp",
-                    "host_env": "FTOS_SMTP_HOST",
-                    "recipient": recipient or "[FTOS_SMTP_USER]",
-                },
-                **smtp_meta,
-            ).to_dict()
-        except Exception as exc:  # noqa: BLE001
-            return fail(f"smtp error: {exc}").to_dict()
+        if cfg is None:
+            return fail("smtp config unavailable after gate check").to_dict()
+        return _send_smtp(cfg, subject, rendered, recipient, smtp_meta)
 
     # Try Slack second
     slack_configured, slack_meta = gate("slack")
     if slack_configured:
         cfg = _get_target_config("slack")
-        assert cfg is not None
-        try:
-            resp = httpx.post(
-                cfg["FTOS_SLACK_WEBHOOK"],
-                json={"text": f"*{subject}*\n\n{body}"},
-                timeout=10,
-            )
-            raw = resp.text
-            sanitized, _ = sanitize_text(raw)
-            return ok(
-                {
-                    "message": rendered,
-                    "channel": "slack",
-                    "webhook_env": "FTOS_SLACK_WEBHOOK",
-                    "response": sanitized,
-                },
-                **slack_meta,
-            ).to_dict()
-        except Exception as exc:  # noqa: BLE001
-            return fail(f"slack error: {exc}").to_dict()
+        if cfg is None:
+            return fail("slack config unavailable after gate check").to_dict()
+        return _send_slack(cfg, subject, body, rendered, slack_meta)
 
     # Dry-run: neither configured
     return ok(
@@ -234,34 +383,9 @@ def schedule_meeting(
         ).to_dict()
 
     cfg = _get_target_config("calendly")
-    assert cfg is not None
-    try:
-        resp = httpx.get(
-            "https://api.calendly.com/event_types",
-            headers={
-                "Authorization": f"Bearer {cfg['FTOS_CALENDLY_TOKEN']}",
-                "Content-Type": "application/json",
-            },
-            timeout=15,
-        )
-        raw = resp.json()
-        # Sanitize string fields in the response
-        sanitized_str, _ = sanitize_text(str(raw))
-        scheduling_url = raw.get("scheduling_url") or raw.get("resource", {}).get(
-            "scheduling_url", ""
-        )
-        san_url, _ = sanitize_text(str(scheduling_url))
-        return ok(
-            {
-                "command": dry_command,
-                "scheduling_url": san_url,
-                "duration": duration,
-                "window": window,
-            },
-            **meta,
-        ).to_dict()
-    except Exception as exc:  # noqa: BLE001
-        return fail(f"calendly error: {exc}").to_dict()
+    if cfg is None:
+        return fail("calendly config unavailable after gate check").to_dict()
+    return _fetch_calendly_slots(cfg, dry_command, duration, window, meta)
 
 
 # ---------------------------------------------------------------------------
@@ -360,53 +484,29 @@ def generate_invoice(
     ref = invoice_ref or f"INV-{uuid.uuid4().hex[:8].upper()}"
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    # Compute totals from lines
-    try:
-        subtotal = sum(float(ln.get("montant", 0)) for ln in lines)
-        tva_rate = 20
-        tva_amt = round(subtotal * tva_rate / 100, 2)
-        ttc = round(subtotal + tva_amt, 2)
-    except (TypeError, ValueError) as exc:
-        return fail(f"invalid line amounts: {exc}").to_dict()
+    subtotal, tva_rate, tva_amt, ttc, tot_err = _compute_invoice_totals(lines)
+    if subtotal is None:
+        return fail(tot_err).to_dict()
 
-    # Map lines to template variable names (template uses .desc/.qty/.pu/.montant)
-    template_lines = [
-        {
-            "desc": ln.get("desc", ln.get("label", "")),
-            "qty": ln.get("qty", 1),
-            "pu": ln.get("pu", ln.get("amount", 0)),
-            "montant": ln.get("montant", ln.get("amount", 0)),
-        }
-        for ln in lines
-    ]
+    content, tmpl_err = _render_invoice_content(
+        project_id,
+        ref,
+        prestataire_nom,
+        client_nom,
+        date_str,
+        _map_invoice_lines(lines),
+        subtotal,
+        tva_rate,
+        tva_amt,
+        ttc,
+        conditions_paiement,
+    )
+    if content is None:
+        return fail(tmpl_err).to_dict()
 
-    try:
-        content = render_template(
-            "business/invoice.md.j2",
-            project_id=project_id,
-            invoice_ref=ref,
-            prestataire_nom=prestataire_nom,
-            client_nom=client_nom,
-            date=date_str,
-            echeance=None,
-            lignes=template_lines,
-            montant_ht=subtotal,
-            tva_taux=tva_rate,
-            montant_tva=tva_amt,
-            montant_ttc=ttc,
-            iban=None,
-            bic=None,
-            conditions_paiement=conditions_paiement,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return fail(f"template error: {exc}").to_dict()
-
-    s = _get_store(store)
-    try:
-        dest = s.project_dir(project_id) / "deliverables" / "invoice.md"
-        write_text_atomic(dest, content)
-    except (ValueError, OSError) as exc:
-        return fail(str(exc)).to_dict()
+    dest, write_err = _write_invoice_md(project_id, content, _get_store(store))
+    if dest is None:
+        return fail(write_err).to_dict()
 
     md_sha256 = sha256_bytes(content.encode())
     result_data: dict[str, Any] = {"md_path": str(dest), "sha256": md_sha256}
@@ -536,7 +636,7 @@ _MCP_TOOLS = [
 ]
 
 
-def register(mcp: object) -> None:  # type: ignore[type-arg]
+def register(mcp: Any) -> None:
     """Register all client tools with the FastMCP instance."""
     for fn, desc in _MCP_TOOLS:
         mcp.tool(description=desc)(fn)  # type: ignore[union-attr]

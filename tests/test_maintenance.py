@@ -8,7 +8,7 @@ C2 tool:  64 mcp_self_update (git_remote).
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -109,6 +109,20 @@ class TestCheckModelRot:
         )
         assert result["success"] is True
         assert result["data"]["drift_detected"] is True
+
+    def test_zero_baseline_fails(self) -> None:
+        """When the first metric value is 0.0, relative drift is undefined → fail."""
+        history = [
+            {"date": "2025-01-01", "metrics": {"accuracy": 0.0}},
+            {"date": "2025-02-01", "metrics": {"accuracy": 0.05}},
+        ]
+        result = maintenance.check_model_rot(
+            metric_history=history,
+            metric_key="accuracy",
+            threshold=0.05,
+        )
+        assert result["success"] is False
+        assert "zero baseline" in result["error"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -360,9 +374,3 @@ class TestMaintenanceMcpWrappers:
 
         maintenance.register(FakeMcp())
         assert len(registered) == 4  # tools 61-64
-
-
-# ---------------------------------------------------------------------------
-# Missing import guard for test_no_network_call
-# ---------------------------------------------------------------------------
-from unittest.mock import MagicMock  # noqa: E402

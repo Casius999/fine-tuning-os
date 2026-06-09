@@ -41,6 +41,73 @@ def _get_store(store: Store | None) -> Store:
 # ---------------------------------------------------------------------------
 
 
+def _drift_result(
+    metric_key: str,
+    first_val: float,
+    last_val: float,
+    drift_detected: bool,
+    magnitude: float,
+    threshold: float,
+) -> dict[str, Any]:
+    """Build the ok envelope payload for a drift measurement."""
+    detail = (
+        f"{metric_key}: {first_val:.4f} → {last_val:.4f} "
+        f"({'degraded' if drift_detected else 'stable'}, "
+        f"relative change {magnitude:.4f}, threshold {threshold})"
+    )
+    return ok(
+        {
+            "drift_detected": drift_detected,
+            "magnitude": magnitude,
+            "detail": detail,
+            "metric_key": metric_key,
+            "first_value": first_val,
+            "last_value": last_val,
+        }
+    ).to_dict()
+
+
+def _extract_metric_values(
+    metric_history: list[dict[str, Any]],
+    metric_key: str,
+) -> list[tuple[str, float]]:
+    """Extract (date, float_val) pairs for metric_key from history entries."""
+    values: list[tuple[str, float]] = []
+    for entry in metric_history:
+        val = entry.get("metrics", {}).get(metric_key)
+        if val is not None:
+            try:
+                values.append((entry.get("date", ""), float(val)))
+            except (TypeError, ValueError):
+                pass
+    return values
+
+
+def _compute_drift(
+    first_val: float,
+    last_val: float,
+    lower_is_better: bool,
+    threshold: float,
+) -> tuple[bool, float]:
+    """Compute (drift_detected, magnitude) for a metric pair.
+
+    Returns fail-sentinel (True, -1.0) when baseline is zero — callers must
+    check for magnitude == -1.0 and handle the zero-baseline error case.
+    """
+    if first_val == 0.0:
+        # Signal: cannot compute relative drift from a zero baseline
+        return True, -1.0
+    if lower_is_better:
+        # degradation: value increased
+        relative_change = (last_val - first_val) / abs(first_val)
+    else:
+        # degradation: value decreased
+        relative_change = (first_val - last_val) / abs(first_val)
+    magnitude = round(max(relative_change, 0.0), 6)
+    drift_detected = relative_change > threshold
+    return drift_detected, magnitude
+
+
 def check_model_rot(
     metric_history: list[dict[str, Any]],
     metric_key: str,
@@ -55,6 +122,9 @@ def check_model_rot(
 
     lower_is_better: set True for perplexity / loss — auto-detected for
     known metric names if omitted.
+
+    Returns fail when metric_history is empty, the metric_key is absent, or
+    the baseline value is 0.0 (relative drift is undefined for a zero baseline).
     """
     if not metric_history:
         return fail("metric_history must not be empty").to_dict()
@@ -63,15 +133,7 @@ def check_model_rot(
     if metric_key in _LOWER_IS_BETTER_METRICS:
         lower_is_better = True
 
-    # Extract values for the requested key
-    values: list[tuple[str, float]] = []
-    for entry in metric_history:
-        val = entry.get("metrics", {}).get(metric_key)
-        if val is not None:
-            try:
-                values.append((entry.get("date", ""), float(val)))
-            except (TypeError, ValueError):
-                pass
+    values = _extract_metric_values(metric_history, metric_key)
 
     if not values:
         return fail(f"metric_key {metric_key!r} not found in any history entry").to_dict()
@@ -89,34 +151,10 @@ def check_model_rot(
     last_val = values[-1][1]
 
     if first_val == 0.0:
-        magnitude = abs(last_val - first_val)
-        drift_detected = magnitude > threshold
-    else:
-        if lower_is_better:
-            # degradation: value increased
-            relative_change = (last_val - first_val) / abs(first_val)
-        else:
-            # degradation: value decreased
-            relative_change = (first_val - last_val) / abs(first_val)
-        magnitude = round(max(relative_change, 0.0), 6)
-        drift_detected = relative_change > threshold
+        return fail("cannot compute relative drift from a zero baseline").to_dict()
 
-    detail = (
-        f"{metric_key}: {first_val:.4f} → {last_val:.4f} "
-        f"({'degraded' if drift_detected else 'stable'}, "
-        f"relative change {magnitude:.4f}, threshold {threshold})"
-    )
-
-    return ok(
-        {
-            "drift_detected": drift_detected,
-            "magnitude": magnitude,
-            "detail": detail,
-            "metric_key": metric_key,
-            "first_value": first_val,
-            "last_value": last_val,
-        }
-    ).to_dict()
+    drift_detected, magnitude = _compute_drift(first_val, last_val, lower_is_better, threshold)
+    return _drift_result(metric_key, first_val, last_val, drift_detected, magnitude, threshold)
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +219,19 @@ def suggest_retraining(
 # ---------------------------------------------------------------------------
 
 
+def _build_model_diff(old_repo: str, new_repo: str, old_revision: str, new_revision: str) -> str:
+    """Build a unified-diff style string for a base model config change."""
+    lines = [
+        "--- config/model (old)",
+        "+++ config/model (new)",
+        f"-  base_model:    {old_repo}",
+        f"+  base_model:    {new_repo}",
+        f"-  base_revision: {old_revision}",
+        f"+  base_revision: {new_revision}",
+    ]
+    return "\n".join(lines)
+
+
 def update_base_model(
     project_id: str,
     new_repo: str,
@@ -204,16 +255,7 @@ def update_base_model(
 
     old_repo = state.get("base_model", "[none]")
     old_revision = state.get("base_revision", "[none]")
-
-    diff_lines = [
-        "--- config/model (old)",
-        "+++ config/model (new)",
-        f"-  base_model:    {old_repo}",
-        f"+  base_model:    {new_repo}",
-        f"-  base_revision: {old_revision}",
-        f"+  base_revision: {new_revision}",
-    ]
-    diff = "\n".join(diff_lines)
+    diff = _build_model_diff(old_repo, new_repo, old_revision, new_revision)
 
     try:
         s.update_project(
@@ -255,7 +297,8 @@ def mcp_self_update(ref: str = "main") -> dict[str, Any]:
         return ok({"command": dry_command, "ref": ref}, **meta).to_dict()
 
     cfg = _get_target_config("git_remote")
-    assert cfg is not None
+    if cfg is None:
+        return fail("git_remote config unavailable after gate check").to_dict()
     remote = cfg["FTOS_GIT_REMOTE"]
 
     # Build the command as a list (shell=False — never inline credentials)
@@ -360,7 +403,7 @@ _MCP_TOOLS = [
 ]
 
 
-def register(mcp: object) -> None:  # type: ignore[type-arg]
+def register(mcp: Any) -> None:
     """Register all maintenance tools with the FastMCP instance."""
     for fn, desc in _MCP_TOOLS:
         mcp.tool(description=desc)(fn)  # type: ignore[union-attr]
