@@ -84,6 +84,29 @@ pytest tests/test_registration.py -v
 5. Update the Tool Catalogue in `README.md`.
 6. The `test_registration.py` total count check will need updating if you add tools.
 
+## Mutation testing (opt-in)
+
+Mutation testing is **not** part of the CI gate — it is too slow to run on every push. Run it
+locally when evaluating test suite robustness:
+
+```bash
+# Run full mutation suite (may take several minutes)
+mutmut run
+
+# Show surviving mutants after a run
+mutmut results
+
+# Show the diff for a specific surviving mutant
+mutmut show <id>
+```
+
+Configuration lives in `[tool.mutmut]` in `pyproject.toml`:
+- `paths_to_mutate = "src/fine_tuning_os/"` — source under mutation
+- `tests_dir = "tests/"` — test directory
+- `runner = "python -m pytest -x -q"` — fast-fail runner
+
+A mutation score ≥ 80% is the informal bar before merging significant new modules.
+
 ## Reporting bugs / requesting features
 
 Use the issue forms. For **security vulnerabilities**, do NOT open a public issue — see

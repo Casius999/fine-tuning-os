@@ -40,6 +40,11 @@ omit = ["src/fine_tuning_os/templates/*"]
 [tool.coverage.report]
 fail_under = 95
 
+[tool.mutmut]
+paths_to_mutate = "src/fine_tuning_os/"
+tests_dir = "tests/"
+runner = "python -m pytest -x -q"
+
 [tool.ruff]
 line-length = 100
 
