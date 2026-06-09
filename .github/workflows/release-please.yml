@@ -26,6 +26,9 @@ jobs:
         with:
           egress-policy: audit
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        # Stays green until RELEASE_PLEASE_TOKEN is set; PR creation requires the PAT
+        # (the default GITHUB_TOKEN is not permitted to create pull requests).
+        continue-on-error: true
         with:
           # Dedicated PAT (contents:write + pull-requests:write) lets release-please create the
           # release PR and chains downstream workflows (sbom-attest) on the created tag.

@@ -78,52 +78,52 @@ Guarantees enforced by `tests/test_zero_data.py` on every CI run:
 ```mermaid
 flowchart TB
     subgraph Host["MCP Host (Claude Code / Claude Desktop)"]
-        CC[Claude Code]
+        CC["Claude Code"]
     end
 
     subgraph Server["fine-tuning-os MCP Server (stdio)"]
-        S[server.py\nFastMCP + 65 tools]
+        S["server.py<br/>FastMCP + 65 tools"]
 
         subgraph Socle["Socle / Infrastructure"]
-            ST[store.py\nFilesystem abstraction]
-            TG[targets.py\ngate() — env-based C2 activation]
-            MD[models.py\nResponse dataclasses]
-            CR[crypto.py\nAES-256 encryption]
-            SN[sanitize.py\nSecret/PII stripping]
-            RE[render.py\nMarkdown → PDF]
+            ST["store.py<br/>Filesystem abstraction"]
+            TG["targets.py<br/>gate() — env-based C2 activation"]
+            MD["models.py<br/>Response dataclasses"]
+            CR["crypto.py<br/>AES-256-GCM encryption"]
+            SN["sanitize.py<br/>Secret / PII stripping"]
+            RE["render.py<br/>Markdown to PDF"]
         end
 
         subgraph Tools["10 Tool Modules"]
-            T1[prep\n9 tools]
-            T2[synthetic\n1 tool]
-            T3[pipeline\n7 tools]
-            T4[execution\n8 tools]
-            T5[evaluation\n7 tools]
-            T6[security\n6 tools C3]
-            T7[packaging\n8 tools]
-            T8[docs\n8 tools]
-            T9[client\n6 tools]
-            T10[maintenance\n4 tools]
+            T1["prep<br/>9 tools"]
+            T2["synthetic<br/>1 tool"]
+            T3["pipeline<br/>7 tools"]
+            T4["execution<br/>8 tools"]
+            T5["evaluation<br/>7 tools"]
+            T6["security<br/>6 tools · C3"]
+            T7["packaging<br/>8 tools"]
+            T8["docs<br/>8 tools"]
+            T9["client<br/>6 tools"]
+            T10["maintenance<br/>4 tools"]
         end
     end
 
     subgraph Boundary["Zero-Data Boundary"]
         direction LR
-        ZD["C1/C3: socket=BLOCKED\nC2: dry_run when no env\nAll writes: FTOS_WORKSPACE only"]
+        ZD["C1/C3: socket = BLOCKED<br/>C2: dry_run when no env<br/>All writes: FTOS_WORKSPACE only"]
     end
 
     subgraph Enclave["Client Enclave (optional)"]
-        HF[HuggingFace API]
-        SSH[Remote GPU server\nSSH]
-        REG[Container Registry]
-        SFTP[SFTP / SMTP / Slack]
+        HF["HuggingFace API"]
+        SSH["Remote GPU server<br/>SSH"]
+        REG["Container Registry"]
+        SFTP["SFTP / SMTP / Slack"]
     end
 
-    CC <-->|MCP stdio protocol| S
+    CC <-->|"MCP stdio protocol"| S
     S --> Socle
     S --> Tools
     Tools --> Boundary
-    Boundary -.->|C2 live mode\nonly when env set| Enclave
+    Boundary -.->|"C2 live mode<br/>only when env set"| Enclave
 ```
 
 The server registers all 65 tools at startup. C2 tools call `gate()` from `targets.py` to check whether the required environment variable is set; if not, they return the dry-run command without touching the network.
