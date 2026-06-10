@@ -210,6 +210,7 @@ def test_send_status_update_smtp_live() -> None:
                 "FTOS_SMTP_USER": "sender@test.local",
                 "FTOS_SMTP_PASSWORD": "",  # no-auth path (plain sink)
                 "FTOS_SMTP_PORT": str(port),
+                "FTOS_SMTP_STARTTLS": "false",  # plain local sink has no TLS
                 # Clear Slack so SMTP path is taken first
                 "FTOS_SLACK_WEBHOOK": "",
             },
@@ -379,39 +380,15 @@ def test_trigger_remote_training_ssh_live() -> None:
                 "FTOS_SSH_KEY": key_path,
             },
         ):
-            # Patch _ssh_exec to use our port (the tool uses hostname from env
-            # but always connects on port 22; we need to redirect to our port)
-            from fine_tuning_os.tools import execution as _exec_mod
+            # The real _ssh_exec now parses host:port, so NO patch is needed —
+            # this drives the tool's own SSH connection code end-to-end against
+            # the in-process paramiko server.
+            from fine_tuning_os.tools.execution import trigger_remote_training
 
-            original_ssh_exec = _exec_mod._ssh_exec
-
-            def _patched_ssh_exec(host: str, key_path_arg: str, command: str) -> tuple[str, str]:
-                client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                client.connect(
-                    hostname="127.0.0.1",
-                    port=port,
-                    key_filename=key_path_arg,
-                    timeout=10,
-                )
-                try:
-                    _, stdout, stderr = client.exec_command(command)
-                    out = stdout.read().decode(errors="replace")
-                    err = stderr.read().decode(errors="replace")
-                    return out, err
-                finally:
-                    client.close()
-
-            _exec_mod._ssh_exec = _patched_ssh_exec  # type: ignore[assignment]
-            try:
-                from fine_tuning_os.tools.execution import trigger_remote_training
-
-                result = trigger_remote_training(
-                    target="127.0.0.1",
-                    command="python train.py --epochs 1",
-                )
-            finally:
-                _exec_mod._ssh_exec = original_ssh_exec  # type: ignore[assignment]
+            result = trigger_remote_training(
+                target="127.0.0.1",
+                command="python train.py --epochs 1",
+            )
     finally:
         os.unlink(key_path)
         server_sock.close()
