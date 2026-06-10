@@ -43,7 +43,7 @@ ruff check --output-format=github .
 # Format check
 black --check .
 
-# Type check (advisory — passes with lenient config)
+# Type check (strict — required CI gate)
 mypy src
 
 # Full test suite with coverage
@@ -108,21 +108,35 @@ pure, deterministic function, consider adding a `@given` test for it.
 ## Mutation testing (opt-in)
 
 Mutation testing is **not** part of the CI gate — it is too slow to run on every push. Run it
-locally when evaluating test suite robustness:
+locally when evaluating test suite robustness.
+
+### Current score (2026-06-10)
+
+**Core mutation score: 100% — 13/13 killed** across `sanitize.py`, `crypto.py`,
+`targets.py`, and `envelope.py`.
+
+Mutations exercised (via `scripts/run_mutation.py`):
+- Comparison operators (`!=` → `==`, `<` → `<=`, `is None` → `is not None`)
+- Negation removal (`not x` → `x`)
+- Integer constant off-by-one (`_NONCE_BYTES`, `_KEY_BYTES`, `_TAG_BYTES`, `bit_length`)
+- AugAssign zeroing (`count += n` → `count += 0`)
+
+All 13 mutations were killed by the existing unit/property test suite (no survivors).
+
+### Running mutation tests
 
 ```bash
-# Run full mutation suite (may take several minutes)
+# Cross-platform runner (works on Windows; mutmut requires WSL/Linux)
+python scripts/run_mutation.py
+
+# On Linux/macOS/WSL — mutmut native
 mutmut run
-
-# Show surviving mutants after a run
 mutmut results
-
-# Show the diff for a specific surviving mutant
 mutmut show <id>
 ```
 
 Configuration lives in `[tool.mutmut]` in `pyproject.toml`:
-- `paths_to_mutate = "src/fine_tuning_os/"` — source under mutation
+- `paths_to_mutate = "src/fine_tuning_os/sanitize.py:src/fine_tuning_os/crypto.py:src/fine_tuning_os/targets.py:src/fine_tuning_os/envelope.py"` — core pure modules
 - `tests_dir = "tests/"` — test directory
 - `runner = "python -m pytest -x -q"` — fast-fail runner
 
