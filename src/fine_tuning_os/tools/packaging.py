@@ -102,7 +102,7 @@ def _execute_or_dry(
     run_cmd = cmd
     run_list = use_list
     if python_bin_replace and cfg:
-        python_bin = cfg.get("FTOS_LOCAL_PYTHON", "python3")  # type: ignore[union-attr]
+        python_bin = cfg.get("FTOS_LOCAL_PYTHON", "python3")
         run_cmd = cmd.replace("python3 ", f"{python_bin} ", 1)
         if run_list:
             run_list = [python_bin if x == "python3" else x for x in run_list]
@@ -609,7 +609,9 @@ def _sftp_put(host: str, user: str, key_path: str, src: Path, remote_dest: str) 
             username=user,
             pkey=paramiko.RSAKey.from_private_key_file(key_path),
         )
-        sftp = paramiko.SFTPClient.from_transport(transport)  # type: ignore[arg-type]
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        if sftp is None:
+            raise paramiko.SSHException("from_transport returned None — SFTP not negotiated")
         try:
             sftp.put(str(src), remote_dest)
         finally:
@@ -792,7 +794,7 @@ _MCP_TOOLS = [
 # fmt: on
 
 
-def register(mcp: object) -> None:  # type: ignore[type-arg]
+def register(mcp: Any) -> None:
     """Register all packaging tools with the FastMCP instance."""
     for fn, desc in _MCP_TOOLS:
-        mcp.tool(description=desc)(fn)  # type: ignore[union-attr]
+        mcp.tool(description=desc)(fn)

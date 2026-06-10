@@ -76,17 +76,30 @@ def _send_smtp(
     recipient: str | None,
     smtp_meta: dict[str, Any],
 ) -> dict[str, Any]:
-    """Send a status update via SMTP and return an envelope dict."""
+    """Send a status update via SMTP and return an envelope dict.
+
+    Port is read from FTOS_SMTP_PORT (default 587). When FTOS_SMTP_PASSWORD is
+    absent or empty the STARTTLS + login steps are skipped so the tool can talk
+    to a plain (no-auth) sink — useful for local integration testing with
+    aiosmtpd.
+    """
+    import os
+
     try:
+        port = int(os.environ.get("FTOS_SMTP_PORT", "587"))
+        password = cfg.get("FTOS_SMTP_PASSWORD", "")
+        use_auth = bool(password)
+
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = cfg["FTOS_SMTP_USER"]
         msg["To"] = recipient or cfg["FTOS_SMTP_USER"]
         msg.attach(MIMEText(rendered, "plain", "utf-8"))
 
-        with smtplib.SMTP(cfg["FTOS_SMTP_HOST"], timeout=30) as server:
-            server.starttls()
-            server.login(cfg["FTOS_SMTP_USER"], cfg["FTOS_SMTP_PASSWORD"])
+        with smtplib.SMTP(cfg["FTOS_SMTP_HOST"], port, timeout=30) as server:
+            if use_auth:
+                server.starttls()
+                server.login(cfg["FTOS_SMTP_USER"], password)
             server.send_message(msg)
 
         return ok(
@@ -640,4 +653,4 @@ _MCP_TOOLS = [
 def register(mcp: Any) -> None:
     """Register all client tools with the FastMCP instance."""
     for fn, desc in _MCP_TOOLS:
-        mcp.tool(description=desc)(fn)  # type: ignore[union-attr]
+        mcp.tool(description=desc)(fn)

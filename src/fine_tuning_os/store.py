@@ -66,7 +66,8 @@ class Store:
 
     def read_project(self, project_id: str) -> dict[str, Any]:
         path = self.project_dir(project_id) / "project.json"
-        return json.loads(path.read_text(encoding="utf-8"))
+        result: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return result
 
     def write_project(self, project_id: str, state: dict[str, Any]) -> None:
         pdir = self.project_dir(project_id)
