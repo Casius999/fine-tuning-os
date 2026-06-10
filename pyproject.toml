@@ -1,6 +1,6 @@
 [project]
 name = "fine-tuning-os"
-version = "0.1.0"
+version = "0.2.0"
 description = "Zero-Data fine-tuning operations MCP server: 64 domain tools across the full LLM fine-tuning delivery lifecycle"
 readme = "README.md"
 requires-python = ">=3.10"
