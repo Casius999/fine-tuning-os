@@ -20,8 +20,12 @@ import sys
 import tempfile
 
 
+import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+
+# Subprocess-based live test — runs in the dedicated `integration` job, not the unit matrix.
+pytestmark = pytest.mark.integration
 
 _TIMEOUT = 30  # seconds — generous for cold-start import on CI
 

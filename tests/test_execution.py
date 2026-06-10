@@ -19,6 +19,39 @@ import pytest
 from fine_tuning_os.tools import execution
 
 
+def test_ssh_exec_parses_host_port() -> None:
+    """_ssh_exec splits host:port and connects on the parsed port."""
+    with patch("fine_tuning_os.tools.execution.paramiko.SSHClient") as mock_client_cls:
+        client = mock_client_cls.return_value
+        stdout = MagicMock()
+        stdout.read.return_value = b"out"
+        stderr = MagicMock()
+        stderr.read.return_value = b"err"
+        client.exec_command.return_value = (MagicMock(), stdout, stderr)
+
+        out, err = execution._ssh_exec("bastion.example:2222", "/key", "echo hi")
+
+        kwargs = client.connect.call_args.kwargs
+        assert kwargs["hostname"] == "bastion.example"
+        assert kwargs["port"] == 2222
+        assert (out, err) == ("out", "err")
+
+
+def test_ssh_exec_defaults_port_22() -> None:
+    """_ssh_exec defaults to port 22 when no :port is given."""
+    with patch("fine_tuning_os.tools.execution.paramiko.SSHClient") as mock_client_cls:
+        client = mock_client_cls.return_value
+        stdout = MagicMock()
+        stdout.read.return_value = b""
+        stderr = MagicMock()
+        stderr.read.return_value = b""
+        client.exec_command.return_value = (MagicMock(), stdout, stderr)
+
+        execution._ssh_exec("plainhost", "/key", "cmd")
+
+        assert client.connect.call_args.kwargs["port"] == 22
+
+
 # ---------------------------------------------------------------------------
 # Tool 18: push_docker_to_registry (C2 registry)
 # ---------------------------------------------------------------------------

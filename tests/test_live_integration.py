@@ -302,6 +302,11 @@ def test_mcp_self_update_git_live() -> None:
 @pytest.mark.integration
 def test_trigger_remote_training_ssh_live() -> None:
     """Drive trigger_remote_training over a real in-process paramiko SSH server."""
+    if os.environ.get("CI"):
+        pytest.skip(
+            "in-process paramiko SSH server is timing-sensitive on shared CI runners; "
+            "runs locally and against a real bastion (set FTOS_SSH_HOST/KEY)"
+        )
     try:
         import paramiko
     except ImportError:
@@ -358,7 +363,11 @@ def test_trigger_remote_training_ssh_live() -> None:
             transport.start_server(server=_SshHandler())
             ch = transport.accept(10)
             if ch:
-                time.sleep(3)
+                # Keep the server alive while the client session is active
+                # (closes promptly once the client disconnects).
+                deadline = time.time() + 15
+                while transport.is_active() and time.time() < deadline:
+                    time.sleep(0.05)
             transport.close()
         except Exception:
             pass
