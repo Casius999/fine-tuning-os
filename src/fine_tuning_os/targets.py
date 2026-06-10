@@ -13,16 +13,24 @@ import os
 from typing import Any
 
 # kind -> env var names that must ALL be present (non-empty) to go live.
+# SMTP: only HOST + USER are required (password is optional — auth is
+# skipped when FTOS_SMTP_PASSWORD is absent/empty, enabling plain sinks).
 _REQUIRED: dict[str, tuple[str, ...]] = {
     "ssh": ("FTOS_SSH_HOST", "FTOS_SSH_KEY"),
     "registry": ("FTOS_REGISTRY", "FTOS_REGISTRY_TOKEN"),
     "sftp": ("FTOS_SFTP_HOST", "FTOS_SFTP_USER", "FTOS_SFTP_KEY"),
-    "smtp": ("FTOS_SMTP_HOST", "FTOS_SMTP_USER", "FTOS_SMTP_PASSWORD"),
+    "smtp": ("FTOS_SMTP_HOST", "FTOS_SMTP_USER"),  # password optional: no-auth path
     "slack": ("FTOS_SLACK_WEBHOOK",),
     "calendly": ("FTOS_CALENDLY_TOKEN",),
     "hf": ("HF_TOKEN",),
     "git_remote": ("FTOS_GIT_REMOTE",),
     "local_python": ("FTOS_LOCAL_PYTHON",),
+}
+
+# Optional env vars fetched by _get_target_config even if absent.
+# These are passed to the tool but do not block the gate.
+_OPTIONAL: dict[str, tuple[str, ...]] = {
+    "smtp": ("FTOS_SMTP_PASSWORD",),
 }
 
 
@@ -44,6 +52,9 @@ def _get_target_config(kind: str) -> dict[str, str] | None:
     Internal use only: C2 tools that must open a live connection read the
     secret values here. Callers MUST NOT log, persist, or return these
     values to Claude (Zero-Data, cf. spec §5/§6).
+
+    Optional vars (e.g. FTOS_SMTP_PASSWORD) are included with their value if
+    present, or as an empty string if absent — never blocking the gate.
     """
     names = _REQUIRED.get(kind)
     if names is None:
@@ -54,6 +65,9 @@ def _get_target_config(kind: str) -> dict[str, str] | None:
         if not val:
             return None
         values[name] = val
+    # Include optional vars (empty string if absent)
+    for name in _OPTIONAL.get(kind, ()):
+        values[name] = os.environ.get(name, "")
     return values
 
 

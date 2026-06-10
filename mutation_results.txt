@@ -1,0 +1,25 @@
+================================================================
+MUTATION SCORE SUMMARY
+================================================================
+Total mutations : 13
+Killed          : 13
+Survived        : 0
+Score           : 100%  (13/13 killed)
+================================================================
+
+SURVIVED MUTATIONS (need attention):
+
+ALL MUTATIONS:
+  KILLED    sanitize.py:35  AugAssign 'count += n' → 'count += 0'
+  KILLED    crypto.py:17  Constant 12 → 13 at line 17
+  KILLED    crypto.py:18  Constant 32 → 33 at line 18
+  KILLED    crypto.py:19  Constant 16 → 17 at line 19
+  KILLED    crypto.py:23  Constant 256 → 257 at line 23
+  KILLED    crypto.py:27  Compare 'len(key) != _KEY_BYTES' → 'len(key) == _KEY_BYTES'
+  KILLED    crypto.py:39  Compare 'len(key) != _KEY_BYTES' → 'len(key) == _KEY_BYTES'
+  KILLED    crypto.py:42  Compare 'len(blob) < _NONCE_BYTES + _TAG_BYTES' → 'len(blob) <= _NONCE_BYTES + _TAG_BYTES'
+  KILLED    targets.py:44  Compare 'names is None' → 'names is not None'
+  KILLED    targets.py:60  Compare 'names is None' → 'names is not None'
+  KILLED    targets.py:65  Negate removal: 'not val' → 'val'
+  KILLED    targets.py:76  Negate removal: 'not resolve_target(kind)' → 'resolve_target(kind)'
+  KILLED    envelope.py:25  Compare 'self.data is not None' → 'self.data is None'

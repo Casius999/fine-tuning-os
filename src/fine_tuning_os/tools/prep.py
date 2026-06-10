@@ -15,7 +15,7 @@ import jinja2
 from pydantic import ValidationError
 
 from ..envelope import fail, ok
-from ..models import DataSchema, SplitRatios, TrainingParams
+from ..models import Column, DataSchema, SplitRatios, TrainingParams
 from ..render import write_text_atomic
 from ..sanitize import sanitize_text
 from ..store import Store, workspace_root
@@ -339,7 +339,7 @@ def describe_expected_data_format(
     """Validate and persist the abstract data schema. No real content."""
     try:
         schema = DataSchema(
-            columns=[{"name": c["name"], "dtype": c["dtype"]} for c in columns],
+            columns=[Column(name=c["name"], dtype=c["dtype"]) for c in columns],
             task_type=task_type,
         )
     except (ValidationError, KeyError) as exc:
@@ -634,7 +634,7 @@ _MCP_TOOLS = [
 ]
 
 
-def register(mcp: object) -> None:  # type: ignore[type-arg]
+def register(mcp: Any) -> None:
     """Register all prep tools with the FastMCP instance."""
     for fn, desc in _MCP_TOOLS:
-        mcp.tool(description=desc)(fn)  # type: ignore[union-attr]
+        mcp.tool(description=desc)(fn)

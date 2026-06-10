@@ -283,9 +283,7 @@ def _rouge_l(pred: str, ref: str) -> float:
     return round(2 * precision * recall / (precision + recall), 6)
 
 
-def _mean_rouge(
-    fn: Callable[[str, str], float], preds: list[str], refs: list[str], **kw: Any
-) -> float:
+def _mean_rouge(fn: Callable[..., float], preds: list[str], refs: list[str], **kw: Any) -> float:
     scores = [fn(p, r, **kw) for p, r in zip(preds, refs)]
     return round(sum(scores) / len(scores), 6) if scores else 0.0
 
@@ -655,7 +653,7 @@ _MCP_TOOLS = [
 ]
 
 
-def register(mcp: object) -> None:  # type: ignore[type-arg]
+def register(mcp: Any) -> None:
     """Register all evaluation tools with the FastMCP instance."""
     for fn, desc in _MCP_TOOLS:
-        mcp.tool(description=desc)(fn)  # type: ignore[union-attr]
+        mcp.tool(description=desc)(fn)

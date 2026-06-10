@@ -26,7 +26,7 @@ lint:
 fmt:
     black .
 
-# Type check (advisory)
+# Type check (strict — required gate)
 typecheck:
     mypy src
 
@@ -46,3 +46,13 @@ demo:
 build:
     python -m pip install --quiet build
     python -m build
+
+# Build distribution and verify with twine; assert py.typed + templates in wheel
+check-dist:
+    python -m build
+    python -m twine check dist/*
+    python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('dist/*.whl')[0]); names=z.namelist(); assert any('py.typed' in n for n in names), 'py.typed missing from wheel'; assert any(n.endswith('.j2') for n in names), 'templates missing from wheel'; print('dist OK: py.typed + templates present')"
+
+# Run integration tests (real local servers; honest skips for docker/SSH)
+integration:
+    pytest -m integration -v

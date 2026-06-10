@@ -407,4 +407,4 @@ _MCP_TOOLS = [
 def register(mcp: Any) -> None:
     """Register all maintenance tools with the FastMCP instance."""
     for fn, desc in _MCP_TOOLS:
-        mcp.tool(description=desc)(fn)  # type: ignore[union-attr]
+        mcp.tool(description=desc)(fn)

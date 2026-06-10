@@ -38,17 +38,22 @@ from ..templating import render_template
 def _ssh_exec(host: str, key_path: str, command: str) -> tuple[str, str]:
     """Connect via paramiko key auth, run command, return (stdout, stderr).
 
+    *host* may be ``hostname`` or ``hostname:port`` (non-standard bastion ports
+    are supported; the port defaults to 22).
+
     AutoAddPolicy is used here to accept unknown host keys for the
     operator-controlled bastion host.  Operators who prefer strict host-key
     checking can supply a known_hosts file via paramiko's load_host_keys().
 
     Caller is responsible for sanitizing the output before returning it.
     """
+    hostname, _, port_str = host.partition(":")
+    port = int(port_str) if port_str else 22
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        # Fix #4: add connect timeout to prevent hanging indefinitely
-        client.connect(hostname=host, key_filename=key_path, timeout=30)
+        # add connect timeout to prevent hanging indefinitely
+        client.connect(hostname=hostname, port=port, key_filename=key_path, timeout=30)
         _, stdout, stderr = client.exec_command(command)
         out = stdout.read().decode(errors="replace")
         err = stderr.read().decode(errors="replace")
@@ -514,7 +519,7 @@ _MCP_TOOLS = [
 ]
 
 
-def register(mcp: object) -> None:  # type: ignore[type-arg]
+def register(mcp: Any) -> None:
     """Register all execution tools with the FastMCP instance."""
     for fn, desc in _MCP_TOOLS:
-        mcp.tool(description=desc)(fn)  # type: ignore[union-attr]
+        mcp.tool(description=desc)(fn)
